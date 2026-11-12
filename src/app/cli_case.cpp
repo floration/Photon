@@ -204,6 +204,18 @@ int runCase(int argc, char** argv) {
                         sim.pressureResidual, sim.zoneP.size(), wall * 1000 / steps);
             std::printf("          fuel in %.4f kg, burned %.4f, in grid %.4f, left the grid unburned %.4f\n", sim.stats.fuelIn,
                         sim.stats.fuelBurned, sim.stats.fuelInDomain, sim.stats.fuelIn - sim.stats.fuelBurned - sim.stats.fuelInDomain);
+            if (sim.maxVel > 15.0f) {   // locate the fastest face (stability diagnostics)
+                float best = 0; int ax = 0, bf = 0;
+                const std::vector<float>* V[3] = {&sim.u, &sim.v, &sim.w};
+                const std::vector<float>* F[3] = {&sim.fx, &sim.fy, &sim.fz};
+                for (int a = 0; a < 3; ++a)
+                    for (size_t f = 0; f < V[a]->size(); ++f)
+                        if (std::fabs((*V[a])[f]) * (*F[a])[f] > best) { best = std::fabs((*V[a])[f]) * (*F[a])[f]; ax = a; bf = (int)f; }
+                int dX = sim.nx + (ax == 0), dY = sim.ny + (ax == 1);
+                int i = bf % dX, j = (bf / dX) % dY, k = bf / (dX * dY);
+                std::printf("          fastest face: axis %d at (%.2f, %.2f, %.2f) m, %.1f m/s, open %.3f\n", ax,
+                            sim.ox + i * sim.dx, sim.oy + j * sim.dx, sim.oz + k * sim.dx, (*V[ax])[bf], (*F[ax])[bf]);
+            }
             std::fflush(stdout);
         }
     }

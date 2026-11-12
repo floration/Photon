@@ -508,6 +508,12 @@ void Solver::project(float dt) {
     std::vector<float>& diag = tmp_[9];
     std::vector<float>& b = rhs_;
     auto bndOpen = [&](int axis, int side, float z) { return std::isnan(windAt(axis, side, z)); };
+    // Outside the open boundary the air is still at ambient pressure. Air
+    // flowing in accelerates from rest, so the static pressure on the boundary
+    // face is lower by its dynamic pressure (H = -u^2/2, stagnation inflow);
+    // outflow leaves at ambient static pressure (H = 0). The inflow condition
+    // also keeps boundary faces from running away.
+    auto hOut = [](float vel, bool inflow) { return inflow ? -0.5f * vel * vel : 0.0f; };
     // matrix coefficients per cell (6 faces) are read from ax_/ay_/az_
     auto coefs = [&](int i, int j, int k, float a[6]) {
         a[0] = ax_[xface(i, j, k)]; a[1] = ax_[xface(i + 1, j, k)];
@@ -532,6 +538,12 @@ void Solver::project(float dt) {
                     b[c] = (S[c] - div) * inv;
                     float a[6];
                     coefs(i, j, k, a);
+                    // open boundary faces: known outside H (Bernoulli for inflow)
+                    if (i == 0 && a[0] > 0) b[c] += a[0] * hOut(u[a0], u[a0] > 0);
+                    if (i == nx - 1 && a[1] > 0) b[c] += a[1] * hOut(u[a1], u[a1] < 0);
+                    if (j == 0 && a[2] > 0) b[c] += a[2] * hOut(v[b0], v[b0] > 0);
+                    if (j == ny - 1 && a[3] > 0) b[c] += a[3] * hOut(v[b1], v[b1] < 0);
+                    if (k == nz - 1 && a[5] > 0) b[c] += a[5] * hOut(w[c1], w[c1] < 0);
                     diag[c] = a[0] + a[1] + a[2] + a[3] + a[4] + a[5];
                 }
     });
@@ -627,10 +639,7 @@ void Solver::project(float dt) {
     }
     // velocity correction u -= dt grad H on matrix faces
     const float s = dt / dx;
-    auto P = [&](int i, int j, int k) -> float {
-        if (i < 0 || j < 0 || i >= nx || j >= ny || k >= nz) return 0.0f;   // open boundary
-        return p[cell(i, j, k)];
-    };
+    auto P = [&](int i, int j, int k) -> float { return p[cell(i, j, k)]; };
     std::vector<float> vmaxPart(nz + 1, 0.0f);
     pool_->parallelFor(nz, [&](int kb, int ke) {
         for (int k = kb; k < ke; ++k) {
@@ -640,7 +649,8 @@ void Solver::project(float dt) {
                     int f = xface(i, j, k);
                     if (fx[f] <= 0) { u[f] = 0; continue; }
                     if (ax_[f] > 0 && !((i == 0 || i == nx) && !bndOpen(0, i == 0 ? 0 : 1, oz + (k + 0.5f) * dx)))
-                        u[f] = std::clamp(u[f] - s * (P(i, j, k) - P(i - 1, j, k)), -VMAX, VMAX);
+                        u[f] = std::clamp(u[f] - s * ((i < nx ? P(i, j, k) : hOut(u[f], u[f] < 0)) -
+                                                      (i > 0 ? P(i - 1, j, k) : hOut(u[f], u[f] > 0))), -VMAX, VMAX);
                     vm = std::max(vm, std::fabs(u[f]) * fx[f]);
                 }
             for (int j = 0; j <= ny; ++j)
@@ -648,14 +658,16 @@ void Solver::project(float dt) {
                     int f = yface(i, j, k);
                     if (fy[f] <= 0) { v[f] = 0; continue; }
                     if (ay_[f] > 0 && !((j == 0 || j == ny) && !bndOpen(1, j == 0 ? 0 : 1, oz + (k + 0.5f) * dx)))
-                        v[f] = std::clamp(v[f] - s * (P(i, j, k) - P(i, j - 1, k)), -VMAX, VMAX);
+                        v[f] = std::clamp(v[f] - s * ((j < ny ? P(i, j, k) : hOut(v[f], v[f] < 0)) -
+                                                      (j > 0 ? P(i, j - 1, k) : hOut(v[f], v[f] > 0))), -VMAX, VMAX);
                     vm = std::max(vm, std::fabs(v[f]) * fy[f]);
                 }
             for (int j = 0; j < ny; ++j)
                 for (int i = 0; i < nx; ++i) {
                     int f = zface(i, j, k + 1);
                     if (fz[f] <= 0) { w[f] = 0; continue; }
-                    if (az_[f] > 0) w[f] = std::clamp(w[f] - s * (P(i, j, k + 1) - P(i, j, k)), -VMAX, VMAX);
+                    if (az_[f] > 0)
+                        w[f] = std::clamp(w[f] - s * ((k + 1 < nz ? P(i, j, k + 1) : hOut(w[f], w[f] < 0)) - P(i, j, k)), -VMAX, VMAX);
                     vm = std::max(vm, std::fabs(w[f]) * fz[f]);
                 }
             vmaxPart[k] = vm;
