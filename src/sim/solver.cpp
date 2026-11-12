@@ -493,13 +493,14 @@ void Solver::solidsStep(float dt) {
         if (total <= 0 && !blocked[c]) continue;
         int i, j, k;
         cellIJK(c, i, j, k);
-        int gas[6], ng = 0;
+        int gas[6], gdir[6] = {5, 5, 5, 5, 5, 5}, ng = 0;   // gdir: direction of the gas cell (4 below, 5 above or self)
         if (blocked[c]) {
             for (int d = 0; d < 6; ++d) {
                 if ((d == 0 && i == 0) || (d == 1 && i == nx - 1) || (d == 2 && j == 0) || (d == 3 && j == ny - 1) ||
                     (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
                 int n = c + off[d];
                 if (blocked[n] || barrierIntact(barrierOn(c, d))) continue;
+                gdir[ng] = d;
                 gas[ng++] = n;
             }
         } else {
@@ -537,7 +538,10 @@ void Solver::solidsStep(float dt) {
             Qs += (1 - bf) * (convU - emitU) * perArea * dt;
             Q[g] -= (1 - bf) * convU * perArea * dt;
             // contact flux on the touched patch (not charged to the gas: the patch is small)
-            flameTouch = std::max(flameTouch, surfaceHeating(g, Tg, Ts, h, 1e-4f) - convU);
+            // flames rise: a flame below a surface bathes it, one beside it licks
+            // it now and then, one above it mostly leaves (MODELED contact share)
+            const float share = (pilot[g] || gdir[q] == 4) ? 1.0f : gdir[q] == 5 ? 0.6f : 0.8f;   // an applied igniter flame touches fully
+            flameTouch = std::max(flameTouch, share * (surfaceHeating(g, Tg, Ts, h, 1e-4f) - convU));
             // burning part: heated by its flame at the pyrolysis temperature
             if (bf > 0) {
                 // burning area: for fuel spread through a cell (needles) only the
@@ -602,7 +606,9 @@ void Solver::solidsStep(float dt) {
             if (Ts >= Tp) { if (!blocked[c]) Ts = Tp; ignite = true; }   // thin fuel: excess heat goes on inward
             if (flameTouch > 0) {
                 ignE[c] += flameTouch * dt;
-                float need = m.density * m.surfaceDepth * m.specificHeat * (Tp - T0);   // J/m2 to heat the surface layer
+                // energy to heat the outer layer (the upholstery cover where there is one)
+                const Material& ms = (coverMat[c] >= 0 && coverLeft[c] > 0) ? lib->materials[coverMat[c]] : m;
+                float need = ms.density * std::max(ms.surfaceDepth, 0.0015f) * ms.specificHeat * (ms.pyrolysisTemp - T0);
                 if (ignE[c] >= need) ignite = true;
             }
             if (ignite && burnFrac[c] <= 0) {
@@ -651,8 +657,12 @@ void Solver::solidsStep(float dt) {
             float v = fromBelow ? m.spreadUp : m.spreadLateral;
             // strong radiation from a hot layer preheats the surface ahead of the
             // flame: spread speeds up with the square of the excess over ~15 kW/m2
-            float boost = std::max(1.0f, qIn / 15000.0f);
-            burnFrac[c] = std::min(1.0f, burnFrac[c] + dt * v * boost * boost / dx);
+            float boost = std::max(1.0f, qIn / 25000.0f);
+            // the flaming patch spreads outward from where it started: its edge
+            // moves at v, so its area grows as 2 sqrt(pi A_b) v (a t-squared fire)
+            float Ab = burnFrac[c] * std::max(area, 1e-4f);
+            float dA = 2.0f * std::sqrt(3.14159265f * Ab) * v * boost * boost * dt;
+            burnFrac[c] = std::min(1.0f, burnFrac[c] + dA / std::max(area, 1e-4f));   // radiant preheat over ~25 kW/m2 speeds it
         }
         fuelT[c] = std::clamp(Ts, T_MIN, T_MAX);
         if (blocked[c] && fuelMass[c] <= 1e-6f && m.combustible) toUnblock.push_back(c);

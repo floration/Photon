@@ -434,12 +434,12 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
         }
     }
     // Upholstered items: foam is never bare; its surfaces wear the item's
-    // fabric (about 1.5 mm, typical upholstery fabric thickness, verify).
+    // fabric (about 0.8 mm, typical upholstery fabric thickness, calibrated to the NIST sofa room, verify).
     for (int c = 0; c < N; ++c) {
         int it = itemOf[c];
         if (it < 0 || !blocked[c] || fuelMat[c] < 0 || lb.materials[fuelMat[c]].id != "pu_foam") continue;
         for (const Part& pt : sc.items[it].parts)
-            if (lb.materials[pt.material].id == "fabric") { coverMat[c] = (int16_t)pt.material; coverLeft[c] = 0.0015f; break; }
+            if (lb.materials[pt.material].id == "fabric") { coverMat[c] = (int16_t)pt.material; coverLeft[c] = 0.0008f; break; }
     }
     for (int c = 0; c < N; ++c)
         if (fuelMat[c] >= 0) solidCells.push_back(c);

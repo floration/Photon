@@ -47,7 +47,7 @@ int runCase(int argc, char** argv) {
     std::string scenePath = "scenes/room_burner.txt", prefix = "case", title = casePath;
     FidelityProfile prof = FidelityProfile::realtime();
     float duration = 60, checkpoint = 0, outDt = 1.0f, dxOverride = 0;
-    bool noLeak = false, noRad = false, adiabatic = false;
+    bool noLeak = false, noRad = false, adiabatic = false, stopWhenOut = false;
     Wind wind;
     std::vector<std::string> opens;
     std::vector<Burner> burners;
@@ -72,6 +72,7 @@ int runCase(int argc, char** argv) {
         else if (k == "no_leakage") noLeak = true;
         else if (k == "no_radiation") noRad = true;
         else if (k == "adiabatic") adiabatic = true;
+        else if (k == "stop_when_out") stopWhenOut = true;
         else if (k == "open" && t.size() > 1) opens.push_back(t[1]);
         else if (k == "burner" && t.size() > 8) {
             Burner b;
@@ -208,6 +209,7 @@ int runCase(int argc, char** argv) {
         sim.step(std::max(1e-4f, target - sim.time));
         ++steps;
         if (sim.time >= nextOut - 1e-5f) { row(); nextOut += outDt; }
+        if (stopWhenOut && sim.time > 90.0f && sim.stats.hrr < 1000.0f && sim.stats.pyrolysis < 1e-5f) { std::printf("fire went out at %.1f s\n", sim.time); break; }
         if (sim.time >= nextCk - 1e-5f) {
             std::string ck = prefix + "_" + std::to_string((int)std::lround(sim.time)) + "s.state";
             if (!sim.saveState(ck, err)) std::fprintf(stderr, "checkpoint: %s\n", err.c_str());
