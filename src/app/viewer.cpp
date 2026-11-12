@@ -6,6 +6,7 @@
 #include "scene/materials.h"
 #include "scene/scene.h"
 #include "sim/solver.h"
+#include "app/ui.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -64,7 +65,7 @@ private:
     Vec3 eye_;
     // toggles
     std::atomic<bool> running_{true};
-    bool hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = true, upperCut_ = false;
+    bool hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = false, upperCut_ = false;
     float cutZ() const { return upperCut_ && sim_->kCeilS.size() > 1 ? sim_->oz + sim_->kCeilS[0] * sim_->dx : 1e9f; }
     RenderOptions ropt_;
     int source_ = 1;
@@ -94,6 +95,14 @@ private:
     void resetSim();
     void updateCamera();
     void handleInput(float frameDt);
+    void drawPanels();
+    Ui ui_;
+    bool showScene_ = true;
+    float sceneScroll_ = 0;
+    int clickMode_ = 0;            // 0 ignite, 1 inspect
+    bool haveSel_ = false;
+    struct SelHit { int kind = 0, cell = -1, from = -1, barrier = -1; Vec3 pos; } sel_;
+    int selObj_ = -1;
     void buildMeshes();
     void uploadVolume();
     void drawOverlay();
@@ -366,7 +375,7 @@ void Viewer::handleInput(float frameDt) {
     eye_.z = std::max(eye_.z, 0.15f);
 
     for (int b = 0; b < 3; ++b)
-        if (in.pressed[b] && dragButton_ < 0) { dragButton_ = b; dragPixels_ = 0; }
+        if (in.pressed[b] && dragButton_ < 0 && !ui_.mouseOverUi()) { dragButton_ = b; dragPixels_ = 0; }
     if (dragButton_ >= 0) {
         dragPixels_ += std::abs(in.dMouseX) + std::abs(in.dMouseY);
         if (dragPixels_ > 4) {
@@ -374,9 +383,14 @@ void Viewer::handleInput(float frameDt) {
             pitch_ -= in.dMouseY * 0.0035f;
         }
         if (in.released[dragButton_]) {
-            if (dragPixels_ <= 4) {
+            if (dragPixels_ <= 4 && !ui_.mouseOverUi()) {
                 Hit h = pick(in.mouseX, in.mouseY);
-                if (dragButton_ == 0 && h.kind != 0) {
+                if (dragButton_ == 0 && h.kind != 0 && (clickMode_ == 1 || in.ctrl)) {
+                    haveSel_ = true;
+                    sel_.kind = h.kind; sel_.cell = h.cell; sel_.from = h.from; sel_.barrier = h.barrier; sel_.pos = h.pos;
+                    const SceneObject* o = objectFor(h);
+                    selObj_ = o ? o->id - 1 : -1;
+                } else if (dragButton_ == 0 && h.kind != 0) {
                     int gasCell = h.kind == 1 ? h.cell : h.from;
                     if (gasCell >= 0 && !sim_->blocked[gasCell]) {
                         const Source& src = SOURCES[source_];
@@ -769,7 +783,7 @@ void Viewer::drawOverlay() {
         for (int e = first; e < nev; ++e, ey += lh)
             ren_.text((float)W - w - 8, ey, mmss(s.events[e].time) + "  " + s.events[e].text, 1, 0.9f, 0.75f);
     }
-    if (help_) {
+    if (help_ && !showScene_) {
         const char* lines[] = {
             "Left-click a surface        start a fire with the selected source (solver decides if it ignites)",
             "Right-click a door/window   open or close a door, break a window",
@@ -793,6 +807,104 @@ void Viewer::drawOverlay() {
     }
 }
 
+void Viewer::drawPanels() {
+    Solver& s = *sim_;
+    float top = ui_.lineHeight() * 3 + 22;
+    float H = (float)plat_.height();
+    if (in_.keyPressed['G']) showScene_ = !showScene_;
+    // ---- left: scene panel
+    if (showScene_) {
+        ui_.panel(8, top, 330, H - top - 70, "Scene  [G hides]", &sceneScroll_);
+        ui_.heading("Click action");
+        if (ui_.button("Start fire with selected source", clickMode_ == 0)) clickMode_ = 0;
+        if (ui_.button("Inspect object (or Ctrl+click)", clickMode_ == 1)) clickMode_ = 1;
+        ui_.heading("Ignition source");
+        for (int i = 0; i < 3; ++i)
+            if (ui_.button(SOURCES[i].name, source_ == i)) source_ = i;
+        ui_.heading("Simulation");
+        if (ui_.button(running_ ? "Pause  [P]" : "Run  [P]", !running_)) running_ = !running_.load();
+        std::string spd = SPEEDS[speedIdx_.load()] > 1e8f ? "max" : fmt("x%g", SPEEDS[speedIdx_.load()]);
+        if (ui_.button("Faster  (now " + spd + ")  [+]")) speedIdx_ = std::min(speedIdx_.load() + 1, NSPEED - 1);
+        if (ui_.button("Slower  [-]")) speedIdx_ = std::max(speedIdx_.load() - 1, 0);
+        if (ui_.button("Reset house  [Backspace]")) { resetSim(); haveSel_ = false; return; }
+        ui_.heading("View");
+        if (ui_.checkbox("Hide roof  [R]", hideRoof_)) meshDirty_ = true;
+        if (ui_.checkbox("Hide ceilings  [Z]", hideCeiling_)) meshDirty_ = true;
+        if (ui_.checkbox("Hide upper story  [U]", upperCut_)) meshDirty_ = true;
+        if (ui_.checkbox("Framing view  [F]", framing_)) meshDirty_ = true;
+        ui_.checkbox("Smoke  [X]", ropt_.smoke);
+        ui_.checkbox("Fire  [V]", ropt_.fire);
+        ui_.checkbox("Temperature slice  [T]", ropt_.slice);
+        ui_.heading("Doors and windows");
+        for (size_t o = 0; o < scene_.openings.size(); ++o) {
+            const Opening& op = scene_.openings[o];
+            if (op.kind == OpeningKind::Cased) continue;
+            bool open = false, any = false;
+            for (const Barrier& b : s.barriers)
+                if (b.opening == (int)o) { any = true; open = open || b.userOpen || b.failed; }
+            if (!any) continue;
+            std::string st = op.kind == OpeningKind::Door ? (open ? "open" : "closed") : (open ? "broken/out" : "intact");
+            if (ui_.button(op.name + "  (" + st + ")", open, 6)) { s.toggleOpening((int)o); meshDirty_ = true; }
+        }
+        ui_.heading("Rooms (click to fly there)");
+        for (int st = 0; st < scene_.stories; ++st) {
+            ui_.label(st == 0 ? "First floor" : st == 1 ? "Second floor" : "Story " + std::to_string(st + 1), 0.7f, 0.7f, 0.7f);
+            for (const Room& r : scene_.rooms) {
+                if (r.story != st) continue;
+                if (ui_.button(r.name, false, 6)) {
+                    float zb = scene_.storyBase(st);
+                    Vec3 c(0.5f * (r.x0 + r.x1), 0.5f * (r.y0 + r.y1), zb + 1.0f);
+                    lookFrom(Vec3(r.x0 + 0.4f, r.y0 + 0.4f, zb + 1.7f), c);
+                    if (st == 0 && scene_.stories > 1) { upperCut_ = false; }
+                    meshDirty_ = true;
+                }
+            }
+        }
+        ui_.space(20);
+    }
+    // ---- right: inspector
+    if (haveSel_) {
+        float w = 430, x = (float)plat_.width() - w - 8, y0 = H - 360 - 70;
+        ui_.panel(x, y0, w, 360, "Inspector  (Ctrl+click to select)");
+        if (selObj_ >= 0 && selObj_ < (int)scene_.objects.size()) {
+            const SceneObject& o = scene_.objects[selObj_];
+            const Material& m = lib_.materials[o.material];
+            auto in = [](float mm) { return fmt("%.2f", mm / 0.0254f); };
+            ui_.label("#" + std::to_string(o.id) + "  " + o.name, 1.0f, 0.95f, 0.7f);
+            ui_.label("Kind: " + o.kind);
+            ui_.label("Size: " + in(2 * o.hu) + " x " + in(2 * o.hv) + " x " + in(2 * o.hn) + " in");
+            ui_.label("Center: " + fmt("%.2f", o.c[0]) + ", " + fmt("%.2f", o.c[1]) + ", " + fmt("%.2f m", o.c[2]));
+            ui_.heading("Material: " + m.id);
+            ui_.label(m.name);
+            ui_.label("density " + fmt("%.0f kg/m3", m.density) + "   k " + fmt("%.3f W/m K", m.conductivity));
+            ui_.label("c_p " + fmt("%.0f J/kg K", m.specificHeat) + "   emissivity " + fmt("%.2f", m.emissivity));
+            if (m.combustible) {
+                ui_.label("off-gas from " + fmt("%.0f C", m.pyrolysisTemp - 273.15) + "   dHc " + fmt("%.1f MJ/kg", m.heatOfCombustion / 1e6));
+                ui_.label("soot yield " + fmt("%.3f", m.sootYield) + "   char " + fmt("%.2f", m.charYield));
+            } else {
+                ui_.label(m.failTemp > 0 ? "non-combustible, fails near " + fmt("%.0f C", m.failTemp - 273.15) : "non-combustible");
+            }
+            std::string src = m.source;
+            while (!src.empty()) {   // wrap the citation
+                size_t n = std::min<size_t>(src.size(), 44);
+                ui_.label(src.substr(0, n), 0.6f, 0.7f, 0.8f);
+                src.erase(0, n);
+            }
+        }
+        ui_.heading("Live state");
+        Hit h;
+        h.kind = sel_.kind; h.cell = sel_.cell; h.from = sel_.from; h.barrier = sel_.barrier; h.pos = sel_.pos;
+        std::string d = describe(h);
+        d = d.substr(0, d.find('\n'));
+        while (!d.empty()) {
+            size_t n = std::min<size_t>(d.size(), 44);
+            ui_.label(d.substr(0, n));
+            d.erase(0, n);
+        }
+        if (ui_.button("Close")) haveSel_ = false;
+    }
+}
+
 void Viewer::run() {
     double last = plat_.now();
     double lastHover = 0;
@@ -810,6 +922,8 @@ void Viewer::run() {
             uiWants_ = false;
             if (!sim_) break;
             updateCamera();
+            ui_.begin(&ren_, &in_);
+            drawPanels();
             handleInput(frameDt);
             if (!sim_) break;
             updateCamera();
@@ -820,7 +934,7 @@ void Viewer::run() {
             ropt_.time = (float)now;
             ropt_.clipZ = std::min(hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f, cutZ());
             if (now - lastHover > 0.1) {
-                hover_ = describe(pick(in_.mouseX, in_.mouseY));
+                hover_ = ui_.mouseOverUi() ? std::string() : describe(pick(in_.mouseX, in_.mouseY));
                 lastHover = now;
             }
             drawOverlay();
