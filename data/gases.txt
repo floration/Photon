@@ -237,3 +237,27 @@ gas TAR
   ufl 0.10
   source "PROTOTYPE lumped species; Phase 4 data job splits it per material (wood: Di Blasi 2008 review of wood pyrolysis products)"
 end
+
+gas STYRENE
+  name "Styrene"
+  formula C8H8
+  molar_mass 104.15
+  heat_of_combustion 40.5e6
+  autoignition 763
+  lfl 0.009
+  ufl 0.068
+  idlh 700
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas C3H3N
+  name "Acrylonitrile"
+  formula C3H3N
+  molar_mass 53.06
+  heat_of_combustion 31.0e6
+  autoignition 754
+  lfl 0.03
+  ufl 0.17
+  idlh 85
+  source "[NFPA] [NIOSH] (verify; heat of combustion PROTOTYPE estimate)"
+end

@@ -1,5 +1,6 @@
 #include "scene/materials.h"
 #include "scene/textfile.h"
+#include <algorithm>
 
 namespace photon {
 
@@ -209,6 +210,62 @@ bool MaterialLibrary::loadComponents(const std::string& path, std::string& err) 
         components.push_back(c);
     }
     return true;
+}
+
+bool MaterialLibrary::loadAssets(const std::string& path, std::string& err) {
+    TextFile f;
+    if (!f.load(path, err)) return false;
+    if (!checkHeader(f, "photon_assets", ASSETS_VERSION, err)) return false;
+    Asset* cur = nullptr;
+    for (size_t li = 1; li < f.lines.size(); ++li) {
+        const TextLine& l = f.lines[li];
+        const std::string& k = l.tok[0];
+        if (k == "asset") {
+            if (l.tok.size() < 2) { err = where(f, l) + "asset needs an id"; return false; }
+            assets.push_back(Asset{});
+            cur = &assets.back();
+            cur->id = l.tok[1];
+            continue;
+        }
+        if (!cur) { err = where(f, l) + "value outside an asset block"; return false; }
+        if (k == "end") {
+            if (cur->parts.empty()) { err = where(f, l) + "asset '" + cur->id + "' has no parts"; return false; }
+            if (cur->source.empty()) { err = where(f, l) + "asset '" + cur->id + "' needs a source"; return false; }
+            cur = nullptr;
+            continue;
+        }
+        if (k == "name") { cur->name = l.tok.size() > 1 ? l.tok[1] : ""; continue; }
+        if (k == "source") { cur->source += (cur->source.empty() ? "" : " | ") + (l.tok.size() > 1 ? l.tok[1] : ""); continue; }
+        if (k == "size") continue;   // informational
+        if (k == "part") {
+            // part <material> <mass kg> x0 y0 z0 x1 y1 z1   (inches, local frame)
+            if (l.tok.size() < 9) { err = where(f, l) + "part <material> <mass> x0 y0 z0 x1 y1 z1"; return false; }
+            AssetPart p;
+            p.material = findMaterial(l.tok[1]);
+            if (p.material < 0) { err = where(f, l) + "unknown material '" + l.tok[1] + "'"; return false; }
+            bool ok;
+            p.mass = (float)toNumber(l.tok[2], ok);
+            if (!ok) { err = where(f, l) + "bad mass"; return false; }
+            float b[6];
+            for (int i = 0; i < 6; ++i) {
+                b[i] = (float)toNumber(l.tok[3 + i], ok) * 0.0254f;
+                if (!ok) { err = where(f, l) + "bad number"; return false; }
+            }
+            p.box[0] = std::min(b[0], b[3]); p.box[3] = std::max(b[0], b[3]);
+            p.box[1] = std::min(b[1], b[4]); p.box[4] = std::max(b[1], b[4]);
+            p.box[2] = std::min(b[2], b[5]); p.box[5] = std::max(b[2], b[5]);
+            cur->parts.push_back(p);
+            continue;
+        }
+        err = where(f, l) + "unknown key '" + k + "'";
+        return false;
+    }
+    return true;
+}
+
+const Asset* MaterialLibrary::asset(const std::string& id) const {
+    for (const Asset& a : assets) if (a.id == id) return &a;
+    return nullptr;
 }
 
 const Component* MaterialLibrary::component(const std::string& id) const {

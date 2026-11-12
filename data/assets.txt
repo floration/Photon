@@ -1,0 +1,354 @@
+photon_assets 1
+# Photon asset library: premade furniture, appliances and fixtures.
+# Inches, local frame: origin at the footprint center on the floor; x across
+# the front, y from the front (-) to the back (+), z up. Scenes place an asset
+# with "place <asset> "<name>" x y [rot 0|90|180|270] [z <ft>]"; rot 0 puts the
+# back toward +y (north).
+#
+#   part <material> <mass kg> x0 y0 z0 x1 y1 z1
+#
+# Sizes are typical retail dimensions. Masses and material splits are PROTOTYPE
+# estimates; the Phase 6 contents data job checks them item by item against
+# NIST TN 2303 and the NIST Fire Calorimetry Database.
+
+# ---------------------------------------------------------------- seating ---
+asset sofa_3seat
+  name "Three-seat sofa, modern upholstered"
+  size 84 36 34
+  part lumber_spf 18   -42 -18 0    42 18 12      # frame, springs deck
+  part pu_foam     7   -36 -18 12   36 9 19       # seat cushions
+  part fabric      4   -36 -18 19   36 9 21       # seat cover
+  part pu_foam     5   -42 9 12     42 18 34      # back cushions
+  part pu_foam     2   -42 -18 12  -36 9 25       # arm
+  part pu_foam     2    36 -18 12   42 9 25       # arm
+  source "Dimensions typical retail; masses PROTOTYPE (NIST TN 2303 sofas for comparison)"
+end
+
+asset loveseat
+  name "Loveseat, modern upholstered"
+  size 60 36 34
+  part lumber_spf 13   -30 -18 0    30 18 12
+  part pu_foam     5   -24 -18 12   24 9 19
+  part fabric      3   -24 -18 19   24 9 21
+  part pu_foam     4   -30 9 12     30 18 34
+  part pu_foam     2   -30 -18 12  -24 9 25
+  part pu_foam     2    24 -18 12   30 9 25
+  source "Dimensions typical retail; masses PROTOTYPE"
+end
+
+asset armchair
+  name "Upholstered armchair"
+  size 36 36 34
+  part lumber_spf  8   -18 -18 0    18 18 12
+  part pu_foam     3   -14 -18 12   14 9 19
+  part fabric      2   -14 -18 19   14 9 21
+  part pu_foam     2   -18 9 12     18 18 34
+  source "NIST Fire Calorimetry Database upholstered chairs for comparison; masses PROTOTYPE"
+end
+
+asset recliner
+  name "Recliner chair with steel mechanism"
+  size 36 38 40
+  part lumber_spf 10   -18 -19 0    18 19 12
+  part steel       8   -14 -15 2    14 15 10
+  part pu_foam     5   -15 -19 12   15 10 20
+  part fabric      3   -15 -19 20   15 10 22
+  part pu_foam     4   -18 10 12    18 19 40
+  source "Dimensions typical retail; masses PROTOTYPE"
+end
+
+asset dining_chair
+  name "Wood dining chair"
+  size 18 20 36
+  part lumber_spf  4   -9 -10 17    9 10 19
+  part lumber_spf  2   -9 8 19      9 10 36
+  source "Typical; masses PROTOTYPE"
+end
+
+asset office_chair
+  name "Office chair, foam seat, plastic and steel base"
+  size 26 26 40
+  part steel       4   -12 -12 0    12 12 4
+  part abs_plastic 5   -10 -10 4    10 10 17
+  part pu_foam     2   -10 -10 17   10 10 21
+  part pu_foam     1   -10 8 21     10 11 40
+  source "Typical; masses PROTOTYPE"
+end
+
+# ---------------------------------------------------------------- tables ----
+asset coffee_table
+  name "Wood coffee table"
+  size 48 24 18
+  part lumber_spf 15   -24 -12 16   24 12 18
+  source "Typical; masses PROTOTYPE"
+end
+
+asset end_table
+  name "Particleboard end table"
+  size 22 22 24
+  part osb 6           -11 -11 22   11 11 24
+  part osb 3           -11 -11 6    11 11 8
+  source "Typical; masses PROTOTYPE"
+end
+
+asset dining_table_6
+  name "Wood dining table, seats six"
+  size 72 40 30
+  part lumber_spf 30   -36 -20 28   36 20 30
+  source "Typical; masses PROTOTYPE"
+end
+
+asset kitchen_table
+  name "Wood kitchen table, seats four"
+  size 48 36 30
+  part lumber_spf 20   -24 -18 28   24 18 30
+  source "Typical; masses PROTOTYPE"
+end
+
+asset desk
+  name "Particleboard desk"
+  size 48 24 30
+  part osb 22          -24 -12 28   24 12 30
+  part osb 8           -24 -12 0   -22 12 28
+  part osb 8            22 -12 0    24 12 28
+  source "Typical; masses PROTOTYPE"
+end
+
+# ---------------------------------------------------------------- bedroom ---
+asset bed_twin
+  name "Twin bed: frame, box spring, foam mattress, bedding"
+  size 39 75 25
+  part lumber_spf 12   -19.5 -37.5 0    19.5 37.5 8
+  part lumber_spf  8   -19.5 -37.5 8    19.5 37.5 14     # box spring frame
+  part pu_foam    10   -19.5 -37.5 14   19.5 37.5 24     # mattress
+  part fabric      4   -19.5 -37.5 24   19.5 37.5 26     # bedding, pillows
+  source "Mattress sizes per ISPA standard dimensions (verify); masses PROTOTYPE (NIST TN 2303 mattresses for comparison)"
+end
+
+asset bed_full
+  name "Full bed: frame, box spring, foam mattress, bedding"
+  size 54 75 25
+  part lumber_spf 15   -27 -37.5 0    27 37.5 8
+  part lumber_spf 10   -27 -37.5 8    27 37.5 14
+  part pu_foam    13   -27 -37.5 14   27 37.5 24
+  part fabric      5   -27 -37.5 24   27 37.5 26
+  source "ISPA mattress dimensions (verify); masses PROTOTYPE"
+end
+
+asset bed_queen
+  name "Queen bed: frame, box spring, foam mattress, bedding"
+  size 60 80 25
+  part lumber_spf 18   -30 -40 0    30 40 8
+  part lumber_spf 12   -30 -40 8    30 40 14
+  part pu_foam    16   -30 -40 14   30 40 24
+  part fabric      6   -30 -40 24   30 40 26
+  part lumber_spf  8   -30 38 0     30 40 48     # headboard
+  source "ISPA mattress dimensions (verify); masses PROTOTYPE"
+end
+
+asset bed_king
+  name "King bed: frame, box spring, foam mattress, bedding"
+  size 76 80 25
+  part lumber_spf 22   -38 -40 0    38 40 8
+  part lumber_spf 15   -38 -40 8    38 40 14
+  part pu_foam    20   -38 -40 14   38 40 24
+  part fabric      8   -38 -40 24   38 40 26
+  part lumber_spf 10   -38 38 0     38 40 48
+  source "ISPA mattress dimensions (verify); masses PROTOTYPE"
+end
+
+asset dresser
+  name "Six-drawer dresser with clothing"
+  size 60 18 34
+  part osb 45          -30 -9 0     30 9 34
+  part fabric 12       -28 -7 3     28 7 30
+  source "Typical; masses PROTOTYPE"
+end
+
+asset chest_of_drawers
+  name "Chest of drawers with clothing"
+  size 36 18 48
+  part osb 35          -18 -9 0     18 9 48
+  part fabric 10       -16 -7 3     16 7 44
+  source "Typical; masses PROTOTYPE"
+end
+
+asset nightstand
+  name "Nightstand"
+  size 22 16 26
+  part osb 10          -11 -8 0     11 8 26
+  source "Typical; masses PROTOTYPE"
+end
+
+asset closet_clothing
+  name "Closet rod of hanging clothes, 6 ft"
+  size 72 24 60
+  part fabric 25       -36 -12 12   36 12 66
+  source "PROTOTYPE estimate"
+end
+
+# ---------------------------------------------------------------- living ----
+asset tv_55
+  name "55 in LCD television"
+  size 49 3 29
+  part abs_plastic 7   -24.5 -1.5 0    24.5 1.5 29
+  part glass 4         -24 -1.5 1      24 -1 28
+  source "Typical 55 in set dimensions; masses PROTOTYPE"
+end
+
+asset tv_stand
+  name "Particleboard TV stand"
+  size 60 18 24
+  part osb 30          -30 -9 0     30 9 24
+  source "Typical; masses PROTOTYPE"
+end
+
+asset bookshelf
+  name "Bookshelf with books"
+  size 36 12 72
+  part osb 30          -18 -6 0     18 6 72
+  part paper 25        -17 -5 2     17 5 70
+  source "Typical; masses PROTOTYPE"
+end
+
+asset floor_lamp
+  name "Floor lamp with fabric shade"
+  size 14 14 62
+  part steel 4         -7 -7 0      7 7 50
+  part fabric 0.4      -7 -7 50     7 7 62
+  source "Typical; masses PROTOTYPE"
+end
+
+# ---------------------------------------------------------------- kitchen ---
+asset base_cabinet_36
+  name "Base cabinet 36 in with laminate countertop"
+  size 36 24 36
+  part osb 25          -18 -12 0    18 12 36
+  source "Standard cabinet dimensions (NKBA); masses PROTOTYPE"
+end
+
+asset upper_cabinet_30
+  name "Upper cabinet 30 in wide, 30 in tall"
+  size 30 12 30
+  part osb 12          -15 -6 0     15 6 30
+  source "Standard cabinet dimensions (NKBA); masses PROTOTYPE"
+end
+
+asset refrigerator
+  name "Refrigerator, 36 in, steel with plastic liner and foam insulation"
+  size 36 30 70
+  part steel 70        -18 -15 0    18 15 70
+  part abs_plastic 12  -16 -13 3    16 13 67
+  part pu_foam 6       -17 -14 2    17 14 68
+  source "Typical; masses PROTOTYPE"
+end
+
+asset range_30
+  name "Electric range, 30 in"
+  size 30 26 36
+  part steel 60        -15 -13 0    15 13 36
+  source "Typical; masses PROTOTYPE"
+end
+
+asset dishwasher
+  name "Dishwasher, 24 in"
+  size 24 24 34
+  part steel 30        -12 -12 0    12 12 34
+  part abs_plastic 8   -11 -11 2    11 11 32
+  source "Typical; masses PROTOTYPE"
+end
+
+asset microwave_otr
+  name "Over-the-range microwave"
+  size 30 15 17
+  part steel 15        -15 -7.5 0   15 7.5 17
+  part abs_plastic 3   -14 -7.5 1   14 -6 16
+  source "Typical; masses PROTOTYPE"
+end
+
+# ---------------------------------------------------------------- laundry ---
+asset washer
+  name "Top-load washer"
+  size 27 28 38
+  part steel 60        -13.5 -14 0  13.5 14 38
+  part abs_plastic 6   -12 -12 4    12 12 34
+  source "Typical; masses PROTOTYPE"
+end
+
+asset dryer
+  name "Electric dryer"
+  size 27 28 38
+  part steel 45        -13.5 -14 0  13.5 14 38
+  part abs_plastic 4   -12 -12 4    12 12 34
+  source "Typical; masses PROTOTYPE"
+end
+
+# ---------------------------------------------------------------- bath ------
+asset toilet
+  name "Vitreous china toilet"
+  size 15 28 30
+  part ceramic 40      -7.5 -14 0   7.5 14 30
+  source "Typical; masses PROTOTYPE"
+end
+
+asset bathtub_60
+  name "Enameled steel bathtub, 60 in"
+  size 60 30 15
+  part steel 50        -30 -15 0    30 15 15
+  source "Typical; masses PROTOTYPE"
+end
+
+asset vanity_36
+  name "Bath vanity 36 in with china top"
+  size 36 21 34
+  part osb 20          -18 -10.5 0  18 10.5 32
+  part ceramic 12      -18 -10.5 32 18 10.5 34
+  source "Typical; masses PROTOTYPE"
+end
+
+# ---------------------------------------------------------------- waste, storage
+asset kitchen_trash
+  name "Kitchen trash can with bagged waste"
+  size 15 12 26
+  part polyethylene 2  -7.5 -6 0    7.5 6 26
+  part paper 4         -6.5 -5 2    6.5 5 24
+  source "PROTOTYPE estimate"
+end
+
+asset wastebasket
+  name "Wastebasket with paper waste"
+  size 10 10 12
+  part polyethylene 0.3 -5 -5 0     5 5 12
+  part paper 0.6        -4 -4 1     4 4 11
+  source "PROTOTYPE estimate"
+end
+
+asset recycling_bin
+  name "Recycling bin of paper and cardboard"
+  size 14 14 16
+  part paper 3         -7 -7 0      7 7 16
+  source "PROTOTYPE estimate"
+end
+
+asset storage_bin
+  name "Polypropylene storage tote with clothing"
+  size 24 16 12
+  part polypropylene 1.5 -12 -8 0   12 8 12
+  part fabric 5          -11 -7 1   11 7 11
+  source "PROTOTYPE estimate"
+end
+
+asset storage_bin_stack
+  name "Stack of three polypropylene storage totes"
+  size 24 16 36
+  part polypropylene 4.5 -12 -8 0   12 8 36
+  part fabric 15         -11 -7 1   11 7 35
+  source "PROTOTYPE estimate"
+end
+
+asset cardboard_boxes
+  name "Stack of cardboard moving boxes with contents"
+  size 36 18 36
+  part paper 25        -18 -9 0     18 9 36
+  source "PROTOTYPE estimate"
+end

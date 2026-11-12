@@ -108,7 +108,22 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
             stories = std::max(1, (int)s);
         } else if (k == "floor_depth") {
             if (!num(1, floorDepth)) return false;
-        } else if (k == "joist_spacing") {
+        } else if (k == "roof_type") {
+            if (t.size() < 2) { err = where(f, l) + "roof_type full|half_story"; return false; }
+            if (t[1] == "half_story") halfStory = true;
+            else if (t[1] == "full") halfStory = false;
+            else { err = where(f, l) + "unknown roof_type '" + t[1] + "'"; return false; }
+        } else if (k == "roof_plate_height") {
+            if (!num(1, plateHeight)) return false;
+        } else if (k == "knee_wall_inset") {
+            if (!num(1, kneeInset)) return false;
+        } else if (k == "collar_height") {
+            if (!num(1, collarHeight)) return false;
+        } else if (k == "rafter_spacing") {
+            if (!num(1, rafterSpacing)) return false;
+        } else if (k == "assembly_knee_wall") { if (!asmb(1, kneeWall)) return false; }
+        else if (k == "assembly_sloped_ceiling") { if (!asmb(1, slopedCeiling)) return false; }
+        else if (k == "joist_spacing") {
             if (!num(1, joistSpacing)) return false;
         } else if (k == "joist_depth") {
             if (!num(1, joistDepth)) return false;
@@ -216,6 +231,40 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
             for (const char* kn : known) okType = okType || fx.type == kn;
             if (!okType) { err = where(f, l) + "unknown fixture type '" + fx.type + "'"; return false; }
             fixtures.push_back(fx);
+        } else if (k == "place") {
+            // place <asset> "<name>" x y [rot 0|90|180|270] [z <height above this floor>]
+            if (t.size() < 5) { err = where(f, l) + "place <asset> \"<name>\" x y [rot deg] [z h]"; return false; }
+            const Asset* a = lib.asset(t[1]);
+            if (!a) { err = where(f, l) + "unknown asset '" + t[1] + "' (data/assets.txt)"; return false; }
+            float px, py, rot = 0, pz = 0;
+            if (!num(3, px) || !num(4, py)) return false;
+            for (size_t i = 5; i + 1 < t.size(); i += 2) {
+                if (t[i] == "rot") { if (!num(i + 1, rot, false)) return false; }
+                else if (t[i] == "z") { if (!num(i + 1, pz)) return false; }
+                else { err = where(f, l) + "unknown option '" + t[i] + "'"; return false; }
+            }
+            int r = ((int)std::lround(rot / 90.0f) % 4 + 4) % 4;
+            Item it;
+            it.name = t[2];
+            it.story = curStory;
+            float zb = storyBase(curStory) + pz;
+            for (const AssetPart& ap : a->parts) {
+                float xs[2] = {ap.box[0], ap.box[3]}, ys[2] = {ap.box[1], ap.box[4]};
+                float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+                for (float xx : xs)
+                    for (float yy : ys) {
+                        float rx = r == 0 ? xx : r == 1 ? -yy : r == 2 ? -xx : yy;
+                        float ry = r == 0 ? yy : r == 1 ? xx : r == 2 ? -yy : -xx;
+                        bx0 = std::min(bx0, rx); bx1 = std::max(bx1, rx);
+                        by0 = std::min(by0, ry); by1 = std::max(by1, ry);
+                    }
+                Part p;
+                p.material = ap.material;
+                p.mass = ap.mass;
+                p.box = {px + bx0, py + by0, zb + ap.box[2], px + bx1, py + by1, zb + ap.box[5]};
+                it.parts.push_back(p);
+            }
+            items.push_back(it);
         } else if (k == "item") {
             items.push_back(Item{});
             item = &items.back();
@@ -235,6 +284,11 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
         err = path + ": multi-story scenes need assembly_floor_ceiling, assembly_subfloor and joist_material";
         return false;
     }
+    if (halfStory && (kneeWall < 0 || slopedCeiling < 0)) {
+        err = path + ": half-story scenes need assembly_knee_wall and assembly_sloped_ceiling";
+        return false;
+    }
+    if (halfStory && stories < 2) { err = path + ": a half story needs a story below it"; return false; }
     if (studMaterial < 0 || trussMaterial < 0 || gussetMaterial < 0) {
         err = path + ": scene must name stud_material, truss_material and gusset_material";
         return false;
@@ -293,10 +347,26 @@ void Scene::generateFraming(const MaterialLibrary& lib) {
         };
         float sx = alongX ? 1.f : 0.f, sy = alongX ? 0.f : 1.f;
         float p0[3], p1[3];
-        float zs[3] = {T2X * 0.5f, H - T2X * 1.5f, H - T2X * 0.5f};
-        for (float z : zs) {
-            P(a, z, p0); P(b, z, p1);
-            add(MemberKind::Plate, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0, 0, 1, T2X, D2X4);
+        // wall height: a half story's eave walls stop at the rafter plate; its
+        // other walls rise to the collar-tie ceiling and are cut off by the roof
+        bool half = halfStory && w.story == stories - 1;
+        float Hw = !half ? H : (w.exterior && alongX ? plateHeight : collarHeight);
+        auto roomTop = [&](float s) {   // usable height at position s along the wall
+            if (!half) return H;
+            float y = alongX ? c : s;
+            return std::min(Hw, roofUnderside(y) - zb0);
+        };
+        P(a, T2X * 0.5f, p0); P(b, T2X * 0.5f, p1);
+        add(MemberKind::Plate, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0, 0, 1, T2X, D2X4);
+        {   // double top plate wherever the wall reaches its full height
+            float ta = a, tb = b;
+            if (half && !alongX && !w.exterior) { ta = std::max(a, slopedRun()); tb = std::min(b, depth - slopedRun()); }
+            if (half && !alongX && w.exterior) { ta = tb; }   // gable end walls: the rake follows the rafters
+            if (tb > ta)
+                for (float z : {Hw - T2X * 1.5f, Hw - T2X * 0.5f}) {
+                    P(ta, z, p0); P(tb, z, p1);
+                    add(MemberKind::Plate, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0, 0, 1, T2X, D2X4);
+                }
         }
         std::vector<const Opening*> ops;
         for (const Opening& o : openings) {
@@ -318,19 +388,22 @@ void Scene::generateFraming(const MaterialLibrary& lib) {
             }
             return false;
         };
-        float zb = T2X, zt = H - 2 * T2X;
+        float zb = T2X;
         std::vector<float> studs;
         for (float s = a + T2X * 0.5f; s < b - T2X * 0.5f; s += studSpacing) studs.push_back(s);
         studs.push_back(b - T2X * 0.5f);
         for (float s : studs) {
             if (inOpening(s)) continue;
+            float zt = roomTop(s) - 2 * T2X;
+            if (zt < zb + 0.1f) continue;
             P(s, zb, p0); P(s, zt, p1);
             add(MemberKind::Stud, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], sx, sy, 0, T2X, D2X4);
         }
         for (const Opening* o : ops) {
             float oa = alongX ? std::min(o->x0, o->x1) : std::min(o->y0, o->y1);
             float ob = alongX ? std::max(o->x0, o->x1) : std::max(o->y0, o->y1);
-            for (float s : {oa - T2X * 0.5f, ob + T2X * 0.5f}) {
+            for (float s : {oa - T2X * 0.5f, ob + T2X * 0.5f}) {   // king studs
+                float zt = roomTop(s) - 2 * T2X;
                 P(s, zb, p0); P(s, zt, p1);
                 add(MemberKind::Stud, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], sx, sy, 0, T2X, D2X4);
             }
@@ -386,6 +459,38 @@ void Scene::generateFraming(const MaterialLibrary& lib) {
                 add(MemberKind::Tread, studMaterial, xc, a, z, xc, b, z, 1, 0, 0, st.x1 - st.x0, TREAD_T);
             }
         }
+    }
+    // ---- half story: stick-framed roof (rafters, ridge board, collar ties)
+    // and knee walls instead of prefab trusses.
+    if (halfStory) {
+        const float D = depth, oh = eaveOverhang, RB = roofBase();
+        const float cosT = 1.0f / std::sqrt(1 + pitch * pitch);
+        float d8 = D2X8, d10 = 9.25f * IN, d6 = 5.5f * IN;
+        if (const Component* c = lib.component("lumber_2x10")) d10 = c->width;
+        if (const Component* c = lib.component("lumber_2x6")) d6 = c->width;
+        const float zTop = storyBase(stories - 1);
+        auto rafterZ = [&](float y) { float run = y <= 0.5f * D ? y : D - y; return RB + pitch * run + 0.5f * d8 / cosT; };
+        std::vector<float> xs;
+        for (float x = T2X * 0.5f; x < width - T2X * 0.5f; x += rafterSpacing) xs.push_back(x);
+        xs.push_back(width - T2X * 0.5f);
+        float yr = 0.5f * D - 0.5f * T2X;   // rafters butt the ridge board
+        for (float x : xs) {
+            add(MemberKind::Rafter, trussMaterial, x, -oh, rafterZ(0) - pitch * oh, x, yr, rafterZ(yr), 1, 0, 0, T2X, d8);
+            add(MemberKind::Rafter, trussMaterial, x, D + oh, rafterZ(0) - pitch * oh, x, D - yr, rafterZ(yr), 1, 0, 0, T2X, d8);
+            float zc = zTop + collarHeight + 0.5f * d6;
+            add(MemberKind::CollarTie, trussMaterial, x + T2X, slopedRun(), zc, x + T2X, D - slopedRun(), zc, 1, 0, 0, T2X, d6);
+        }
+        float zr = rafterZ(0.5f * D) + 0.25f * d10;
+        add(MemberKind::RidgeBoard, trussMaterial, 0, 0.5f * D, zr, width, 0.5f * D, zr, 0, 0, 1, d10, T2X);
+        // knee walls: single plates, studs from the floor plate to the rafters
+        for (float yk : {kneeInset, D - kneeInset}) {
+            float kh = kneeWallHeight();
+            add(MemberKind::Plate, studMaterial, 0, yk, zTop + 0.5f * T2X, width, yk, zTop + 0.5f * T2X, 0, 0, 1, T2X, D2X4);
+            add(MemberKind::Plate, studMaterial, 0, yk, zTop + kh - 0.5f * T2X, width, yk, zTop + kh - 0.5f * T2X, 0, 0, 1, T2X, D2X4);
+            for (float x = T2X * 0.5f; x < width; x += studSpacing)
+                add(MemberKind::Stud, studMaterial, x, yk, zTop + T2X, x, yk, zTop + kh - T2X, 1, 0, 0, T2X, D2X4);
+        }
+        return;
     }
     // ---- prefab Fink trusses spanning y, spaced along x, on the top story.
     const float D = depth, oh = eaveOverhang, hc = D2X4 * 0.5f;

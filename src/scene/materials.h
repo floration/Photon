@@ -66,14 +66,24 @@ struct Component {
     float thickness = 0, width = 0;   // m
 };
 
+// A premade object (furniture, appliance, fixture) from data/assets.txt.
+// Parts are boxes in a local frame: origin at the footprint center on the
+// floor, x across the front, y front (-) to back (+), z up. Meters.
+struct AssetPart { int material = -1; float mass = 0; float box[6]; };
+struct Asset {
+    std::string id, name, source;
+    std::vector<AssetPart> parts;
+};
+
 // Versioned text formats: each file starts with "photon_<kind> <version>".
-constexpr int GASES_VERSION = 1, MATERIALS_VERSION = 2, ASSEMBLIES_VERSION = 1, COMPONENTS_VERSION = 1, SCENE_VERSION = 1;
+constexpr int ASSETS_VERSION = 1, GASES_VERSION = 1, MATERIALS_VERSION = 2, ASSEMBLIES_VERSION = 1, COMPONENTS_VERSION = 1, SCENE_VERSION = 1;
 
 struct MaterialLibrary {
     std::vector<Gas> gases;
     std::vector<Material> materials;
     std::vector<Assembly> assemblies;
     std::vector<Component> components;
+    std::vector<Asset> assets;
 
     bool loadGases(const std::string& path, std::string& err);       // load before materials
     bool loadMaterials(const std::string& path, std::string& err);
@@ -81,6 +91,8 @@ struct MaterialLibrary {
     bool loadAssemblies(const std::string& path, std::string& err);
     bool loadComponents(const std::string& path, std::string& err);
     const Component* component(const std::string& id) const;
+    bool loadAssets(const std::string& path, std::string& err);     // load after materials
+    const Asset* asset(const std::string& id) const;
     int findMaterial(const std::string& id) const;
     int findAssembly(const std::string& id) const;
     float arealMass(const Layer& l) const;

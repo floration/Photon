@@ -6,7 +6,7 @@ A house fire simulator for firefighter training, written in raw C++20 with OpenG
 
 ## What Phase 1 does
 
-- One hand-built model home: a 50 x 30 ft single-story ranch with 2 bedrooms and 1 bath. It has a slab foundation, 2x4 walls at 16 in o.c., Fink trusses at 24 in o.c., a vented attic, double-pane windows and furniture. See `scenes/model_home.txt`.
+- The default model home is now a 1.5-story Cape Cod (40 x 28 ft, 12/12 stick-framed roof, 5 ft knee walls, sloped ceilings, knee-wall attics). It is furnished from the asset library in data/assets.txt. The earlier two-story house is in scenes/two_story.txt. (Phase 1 originally used a 50 x 30 ft single-story ranch with 2 bedrooms and 1 bath. It has a slab foundation, 2x4 walls at 16 in o.c., Fink trusses at 24 in o.c., a vented attic, double-pane windows and furniture. See `scenes/model_home.txt`.
 - The scene is exact. Every stud, plate, header, truss chord, web and gusset plate is generated at its actual size. The solver works on a derived 20 cm grid of about 160,000 cells.
 - Fire and smoke engine, run on the CPU across all cores:
   - Buoyant gas flow with a pressure projection.

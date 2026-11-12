@@ -55,13 +55,30 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     kCeilS.assign(sc.stories, 0);
     for (int s = 0; s < sc.stories; ++s) {
         kFloorS[s] = fk(sc.storyBase(s));
-        kCeilS[s] = fk(sc.storyBase(s) + sc.ceilingHeight);
+        bool halfTop = sc.halfStory && s == sc.stories - 1;
+        kCeilS[s] = fk(sc.storyBase(s) + (halfTop ? sc.collarHeight : sc.ceilingHeight));
         if (s > 0 && kFloorS[s] <= kCeilS[s - 1]) kFloorS[s] = kCeilS[s - 1] + 1;  // keep a joist-space layer
         if (kCeilS[s] <= kFloorS[s]) { err = "story too short for the grid"; return false; }
     }
     kCeil = kCeilS[sc.stories - 1];
-    const int kSoffit = kCeil - 1;
+    const int top = sc.stories - 1;
+    const bool half = sc.halfStory;
+    const int kRoof0 = half ? fk(sc.roofBase()) : kCeil;   // rafter plate / truss heel level
+    const int kSoffit = kRoof0 - 1;
     const int nEave = std::max(1, (int)std::lround(sc.eaveOverhang / dx));
+    // roof profile (needed early: half-story walls stop at the roof)
+    auto inFoot = [&](int j) { return j >= jS0 && j < jN1; };
+    auto inRoofJ = [&](int j) { return j >= jS0 - nEave && j < jN1 + nEave; };
+    auto ktop = [&](int j) -> int {
+        if (!inFoot(j)) return kRoof0 + 1;  // eave: soffit at kSoffit, deck above
+        int dj = std::min(j - jS0, jN1 - 1 - j);
+        float rise = sc.pitch * (dj + 0.5f) * dx;
+        int n = std::max(1, (int)std::ceil(rise / dx - 0.5f));
+        return kRoof0 + n;
+    };
+    auto dFromEave = [&](int j) { return (std::min(j - jS0, jN1 - 1 - j) + 0.5f) * dx; };   // plan distance in from the eave wall
+    // a half-story cell that is finished room space (between the knee walls, below the flat ceiling)
+    auto roomRegion = [&](int j, int k) { return half && inFoot(j) && k >= kFloorS[top] && k < kCeil && dFromEave(j) >= sc.kneeInset; };
     auto storyOfK = [&](int k) {
         int s = 0;
         while (s + 1 < sc.stories && k >= kFloorS[s + 1]) ++s;
@@ -118,6 +135,39 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
         int k0 = kFloorS[wl.story];
         int k1 = wl.exterior && wl.story + 1 < sc.stories ? kFloorS[wl.story + 1] : kCeilS[wl.story];
         bool alongX = wl.y0 == wl.y1;
+        if (half && wl.story == top) {
+            if (wl.exterior && alongX) k1 = kRoof0;           // eave wall up to the rafter plate
+            else if (wl.exterior) {                           // gable end: full height to the roof line
+                int ifc = fi(wl.x0);
+                bool aInside = !(wl.x0 <= 0.0f);
+                for (int j = jS0; j < jN1; ++j)
+                    for (int k = k0; k < ktop(j); ++k) {
+                        bool room = roomRegion(j, k);
+                        makeBarrier(0, ifc, j, k, room ? wl.assembly : sc.gable, room ? BarrierKind::Wall : BarrierKind::Gable, aInside);
+                    }
+                continue;
+            } else {                                          // partitions stop at the flat or sloped ceiling
+                float a = alongX ? std::min(wl.x0, wl.x1) : std::min(wl.y0, wl.y1);
+                float b = alongX ? std::max(wl.x0, wl.x1) : std::max(wl.y0, wl.y1);
+                if (alongX) {
+                    int jf = fj(wl.y0);
+                    int kk = std::min({kCeil, ktop(jf - 1), ktop(jf)});
+                    for (int i = 0; i < nx; ++i) {
+                        float x = cx(i);
+                        if (x < a || x > b) continue;
+                        for (int k = k0; k < kk; ++k) makeBarrier(1, i, jf, k, wl.assembly, BarrierKind::Wall, true);
+                    }
+                } else {
+                    int ifc = fi(wl.x0);
+                    for (int j = 0; j < ny; ++j) {
+                        float y = cy(j);
+                        if (y < a || y > b) continue;
+                        for (int k = k0; k < std::min(kCeil, ktop(j)); ++k) makeBarrier(0, ifc, j, k, wl.assembly, BarrierKind::Wall, true);
+                    }
+                }
+                continue;
+            }
+        }
         float a = alongX ? std::min(wl.x0, wl.x1) : std::min(wl.y0, wl.y1);
         float b = alongX ? std::max(wl.x0, wl.x1) : std::max(wl.y0, wl.y1);
         if (alongX) {
@@ -136,6 +186,14 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
                 if (y < a || y > b) continue;
                 for (int k = k0; k < k1; ++k) makeBarrier(0, ifc, j, k, wl.assembly, BarrierKind::Wall, aInside);
             }
+        }
+    }
+    // ---- knee walls (half story): between the room and the knee-wall attics ----
+    if (half) {
+        int jKs = fj(sc.kneeInset), jKn = fj(sc.depth - sc.kneeInset);
+        for (int i = iW0; i < iW1; ++i) {
+            for (int k = kFloorS[top]; k < ktop(jKs - 1); ++k) makeBarrier(1, i, jKs, k, sc.kneeWall, BarrierKind::Wall, false);
+            for (int k = kFloorS[top]; k < ktop(jKn); ++k) makeBarrier(1, i, jKn, k, sc.kneeWall, BarrierKind::Wall, true);
         }
     }
     // ---- openings replace wall faces --------------------------------------------
@@ -194,21 +252,13 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
         for (int j = jS0; j < jN1; ++j)
             for (int i = iW0; i < iW1; ++i) {
                 if (!top && inStair(s, i, j)) continue;
+                if (top && half && (dFromEave(j) < sc.slopedRun() || ktop(j) <= kCeilS[s])) continue;   // sloped zone: the roof is the ceiling
                 makeBarrier(2, i, j, kCeilS[s], top ? sc.ceiling : sc.floorCeiling, BarrierKind::Ceiling, true);
                 if (!top) makeBarrier(2, i, j, kFloorS[s + 1], sc.subfloor, BarrierKind::Floor, false);
             }
     }
 
     // ---- roof, eaves, soffits, gables ---------------------------------------
-    auto inFoot = [&](int j) { return j >= jS0 && j < jN1; };
-    auto inRoofJ = [&](int j) { return j >= jS0 - nEave && j < jN1 + nEave; };
-    auto ktop = [&](int j) -> int {
-        if (!inFoot(j)) return kCeil + 1;  // eave: soffit at kSoffit, deck above kCeil
-        int dj = std::min(j - jS0, jN1 - 1 - j);
-        float rise = sc.pitch * (dj + 0.5f) * dx;
-        int n = std::max(1, (int)std::ceil(rise / dx - 0.5f));
-        return kCeil + n;
-    };
     int ridgeTop = 0;
     for (int j = jS0; j < jN1; ++j) ridgeTop = std::max(ridgeTop, ktop(j));
     if (ridgeTop >= nz) { err = "roof does not fit in the grid"; return false; }
@@ -216,7 +266,9 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     for (int i = iW0; i < iW1; ++i) {
         for (int j = jS0 - nEave; j < jN1 + nEave; ++j) {
             int t = ktop(j);
-            int bi = makeBarrier(2, i, j, t, sc.roof, BarrierKind::Roof, true);
+            // a half story's finished rooms have the roof assembly with the sloped ceiling on its underside
+            auto roofAsm = [&](int jj, int kk) { return roomRegion(jj, kk) ? sc.slopedCeiling : sc.roof; };
+            int bi = makeBarrier(2, i, j, t, roofAsm(j, t - 1), BarrierKind::Roof, true);
             if (bi >= 0 && t == ridgeTop) ridgeFaces.push_back(bi);
             if (!inFoot(j)) {
                 int sb = makeBarrier(2, i, j, kSoffit, sc.soffit, BarrierKind::Soffit, false);
@@ -227,17 +279,18 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
                 if (t2 != t) {
                     bool upperIsJ = t > t2;  // attic is in the taller column
                     for (int k = std::min(t, t2); k < std::max(t, t2); ++k)
-                        makeBarrier(1, i, j + 1, k, sc.roof, BarrierKind::Roof, upperIsJ);
+                        makeBarrier(1, i, j + 1, k, roofAsm(upperIsJ ? j : j + 1, k), BarrierKind::Roof, upperIsJ);
                 }
             }
         }
-        // fascia at the outer eave edges (eave cells kSoffit..kCeil)
-        for (int k = kSoffit; k <= kCeil; ++k) {
+        // fascia at the outer eave edges (eave cells kSoffit..kRoof0)
+        for (int k = kSoffit; k <= kRoof0; ++k) {
             makeBarrier(1, i, jS0 - nEave, k, sc.fascia, BarrierKind::Fascia, false);
             makeBarrier(1, i, jN1 + nEave, k, sc.fascia, BarrierKind::Fascia, true);
         }
     }
     for (int j = jS0 - nEave; j < jN1 + nEave; ++j) {
+        if (half && inFoot(j)) continue;   // half-story gable walls were built with the walls
         int t = ktop(j);
         int k0 = inFoot(j) ? kCeil : kSoffit;
         BarrierKind kind = inFoot(j) ? BarrierKind::Gable : BarrierKind::Fascia;
@@ -278,7 +331,8 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     // ---- truss lumber (porous fuel in attic cells) ------------------------------
     for (const Member& mb : sc.members) {
         bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb;
-        if (!truss && mb.kind != MemberKind::Joist && mb.kind != MemberKind::Tread) continue;
+        bool rafter = mb.kind == MemberKind::Rafter || mb.kind == MemberKind::RidgeBoard || mb.kind == MemberKind::CollarTie;
+        if (!truss && !rafter && mb.kind != MemberKind::Joist && mb.kind != MemberKind::Tread) continue;
         float d[3] = {mb.p1[0] - mb.p0[0], mb.p1[1] - mb.p0[1], mb.p1[2] - mb.p0[2]};
         float L = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
         const Material& m = lb.materials[mb.material];
@@ -290,6 +344,11 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             int i = (int)std::floor((x - ox) / dx), j = (int)std::floor((y - oy) / dx), k = (int)std::floor((z - oz) / dx);
             if (i < 0 || j < 0 || i >= nx || j >= ny) continue;
             if (truss) k = std::clamp(k, kCeil, std::max(kCeil, ktop(j) - 1));
+            else if (rafter) {
+                k = std::min(k, ktop(j) - 1);
+                if (mb.kind == MemberKind::CollarTie) k = std::max(k, kCeil);
+                if (roomRegion(j, k)) continue;   // inside the finished sloped ceiling: part of that assembly
+            }
             else if (mb.kind == MemberKind::Joist) { int s = storyOfK(k); k = std::clamp(k, kCeilS[s], std::max(kCeilS[s], (s + 1 < sc.stories ? kFloorS[s + 1] : kCeilS[s] + 1) - 1)); }
             if (k >= nz) continue;
             int c = cell(i, j, k);

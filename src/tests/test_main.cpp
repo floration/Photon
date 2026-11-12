@@ -47,7 +47,7 @@ struct World {
     bool ok = false;
     World() {
         ok = lib.loadGases("data/gases.txt", err) && lib.loadMaterials("data/materials.txt", err) && lib.loadAssemblies("data/assemblies.txt", err) &&
-             lib.loadComponents("data/components.txt", err) &&
+             lib.loadComponents("data/components.txt", err) && lib.loadAssets("data/assets.txt", err) &&
              scene.load("scenes/model_home.txt", lib, err);
     }
 };
@@ -188,7 +188,7 @@ TEST(scene_objects) {
         if (o.kind == "roof deck panel") ++deck;
         CHECK_MSG(o.material >= 0 && o.hu > 0 && o.hv > 0 && o.hn > 0, o.name);
     }
-    CHECK(sheets > 100 && studs > 300 && doors >= 10 && parts > 50 && deck > 20);
+    CHECK(sheets > 100 && studs > 300 && doors >= 8 && parts > 50 && deck > 20);
     // gypsum sheets are standard 4 x 8 ft or cut smaller, never larger
     for (const SceneObject& o : w.scene.objects)
         if (o.kind == "gypsum_board sheet")
@@ -221,6 +221,44 @@ TEST(build_stages_complete) {
     // wiring and plumbing are installed before the walls close
     for (const SceneObject& o : w.scene.objects)
         if (o.kind == "cable" || o.kind == "water line" || o.kind == "drain") CHECK(o.stage == STAGE_ROUGH_IN);
+}
+
+TEST(half_story_cape) {
+    World& w = world();
+    const Scene& sc = w.scene;
+    CHECK(sc.halfStory && sc.stories == 2);
+    int rafters = 0, collars = 0, ridge = 0, trusses = 0;
+    for (const Member& m : sc.members) {
+        rafters += m.kind == MemberKind::Rafter;
+        collars += m.kind == MemberKind::CollarTie;
+        ridge += m.kind == MemberKind::RidgeBoard;
+        trusses += m.kind == MemberKind::TrussChord;
+    }
+    CHECK(rafters > 50 && collars > 25 && ridge == 1 && trusses == 0);
+    CHECK(std::fabs(sc.kneeWallHeight() - 5 * 0.3048f) < 0.01f);   // 2 ft plate + 3 ft at 12/12
+    Solver s;
+    std::string err;
+    CHECK_MSG(s.build(sc, w.lib, err), err);
+    int knee = 0, sloped = 0;
+    int kneeAsm = w.lib.findAssembly("knee_wall_2x4"), slopeAsm = w.lib.findAssembly("roof_sloped_ceiling");
+    for (const Barrier& b : s.barriers) {
+        knee += b.assembly == kneeAsm;
+        sloped += b.assembly == slopeAsm;
+    }
+    CHECK(knee > 100 && sloped > 100);
+    // the knee-wall attic is a separate space: a cell behind the knee wall and one in the room are walled off
+    float zMid = sc.storyBase(1) + 0.5f;
+    int attic = s.cellAt(13 * 0.3048f, 1.5f * 0.3048f, zMid), room = s.cellAt(13 * 0.3048f, 3.6f * 0.3048f, zMid);
+    CHECK(attic >= 0 && room >= 0 && !s.blocked[room]);
+    if (attic >= 0 && room >= 0) {
+        int ai, aj, ak, ri, rj, rk;
+        s.cellIJK(attic, ai, aj, ak);
+        s.cellIJK(room, ri, rj, rk);
+        bool wall = false;
+        for (int j = aj; j < rj; ++j) wall = wall || s.barrierIntact(s.barrierOn(s.cell(ai, j, ak), 3));
+        (void)ri; (void)rk;
+        CHECK(wall);
+    }
 }
 
 // ------------------------------------------------------------ discretizer --

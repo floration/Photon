@@ -47,6 +47,9 @@ const char* memberName(MemberKind k) {
     case MemberKind::Gusset: return "gusset plate";
     case MemberKind::Joist: return "floor joist";
     case MemberKind::Tread: return "stair tread";
+    case MemberKind::Rafter: return "rafter";
+    case MemberKind::RidgeBoard: return "ridge board";
+    case MemberKind::CollarTie: return "collar tie";
     }
     return "member";
 }
@@ -439,9 +442,12 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
         float line = alongX ? w.y0 : w.x0;
         float half = 3.5f * IN * 0.5f + 0.5f * IN;
         float cline = line <= 0.0f ? line + half : line - half;   // stud centerline (framing is pulled inside)
-        float zb = storyBase(w.story) + 1.5f * IN, zt = storyBase(w.story) + H - 3.0f * IN;
+        bool halfW = halfStory && w.story == stories - 1;
+        float wallH = !halfW ? H : (alongX ? plateHeight : collarHeight);
+        float zb = storyBase(w.story) + 1.5f * IN, zt = storyBase(w.story) + wallH - 3.0f * IN;
         int k = 0;
         for (float s = a + 0.75f * IN; s + 0.1f < b; s += studSpacing) {
+            if (halfW && !alongX && (s < kneeInset || s > depth - kneeInset)) continue;   // gable behind the knee walls: unfinished
             float s0 = s + 0.75f * IN, s1 = std::min(b - 0.75f * IN, s + studSpacing - 0.75f * IN);
             if (s1 - s0 < 0.05f) continue;
             bool blocked = false;
@@ -459,14 +465,38 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
     }
     {
         const Assembly& as = lib.assemblies[ceiling];
-        float plane = roofBase();
+        float plane = topCeiling();
+        float y0 = halfStory ? slopedRun() : 0.0f, y1 = halfStory ? depth - slopedRun() : depth;   // over the flat ceiling only
         for (size_t l = 0; l < as.layers.size(); ++l) {
             const Layer& ly = as.layers[l];
             const Material& m = lib.materials[ly.material];
             if (m.density >= 50) continue;
             float zc = plane + layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
-            float c[3] = {0.5f * width, 0.5f * depth, zc}, u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
-            add(m.name + " (attic, blown)", "insulation", ly.material, stories - 1, c, u, v, 0.5f * width, 0.5f * depth, 0.5f * ly.thickness);
+            float c[3] = {0.5f * width, 0.5f * (y0 + y1), zc}, u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
+            add(m.name + " (attic, blown)", "insulation", ly.material, stories - 1, c, u, v, 0.5f * width, 0.5f * (y1 - y0), 0.5f * ly.thickness);
+        }
+    }
+    if (halfStory) {
+        // knee walls: R-13 batts in every bay; sloped ceilings: R-30 batts in the rafter bays
+        float zTop = storyBase(stories - 1), kh = kneeWallHeight();
+        const float cosT = 1.0f / std::sqrt(1 + pitch * pitch), sinT = pitch * cosT;
+        int k = 0;
+        for (float yk : {kneeInset, depth - kneeInset})
+            for (float x = 0.75f * IN; x + 0.1f < width; x += studSpacing) {
+                float x1 = std::min(width - 0.75f * IN, x + studSpacing - 1.5f * IN);
+                float c[3] = {0.5f * (x + 1.5f * IN + x1), yk, zTop + 0.5f * kh}, u[3] = {1, 0, 0}, v[3] = {0, 0, 1};
+                add("R-13 fiberglass batt, knee wall " + std::to_string(++k), "insulation batt", mat("fiberglass"), stories - 1, c, u, v,
+                    0.5f * (x1 - x - 1.5f * IN), 0.5f * (kh - 3 * IN), 0.5f * batt.first);
+            }
+        for (int side = 0; side < 2; ++side) {
+            float sgn = side == 0 ? 1.f : -1.f;
+            float ya = side == 0 ? kneeInset : depth - kneeInset;
+            float len = (slopedRun() - kneeInset) / cosT;
+            float zA = roofUnderside(ya) + 0.5f * 0.184f * cosT;
+            float c[3] = {0.5f * width, ya + sgn * 0.5f * len * cosT, zA + 0.5f * len * sinT};
+            float u[3] = {1, 0, 0}, v[3] = {0, sgn * cosT, sinT};
+            add(std::string("R-30 fiberglass batts, sloped ceiling rafter bays (") + (side == 0 ? "south)" : "north)"), "insulation batt",
+                mat("fiberglass"), stories - 1, c, u, v, 0.5f * width, 0.5f * len, 0.5f * 0.184f);
         }
     }
 
@@ -480,6 +510,8 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
         float line = alongX ? w.y0 : w.x0;
         float outward = w.exterior ? (line <= 0.0f ? -1.0f : 1.0f) : 1.0f;
         float zb = storyBase(w.story);
+        bool halfW = halfStory && w.story == stories - 1;
+        float wallH = !halfW ? H : (w.exterior && alongX ? plateHeight : (w.exterior ? ridgeHeight() - zb : collarHeight));
         float u[3] = {alongX ? 1.f : 0.f, alongX ? 0.f : 1.f, 0.f}, v[3] = {0, 0, 1};
         for (size_t l = 0; l < as.layers.size(); ++l) {
             const Layer& ly = as.layers[l];
@@ -500,7 +532,7 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
             int k = 0;
             for (float s = a; s < b - 0.01f; s += SHEET_W, ++k) {
                 float e = std::min(b, s + SHEET_W);
-                std::vector<R> pieces = {{s, e, zb, zb + H}};
+                std::vector<R> pieces = {{s, e, zb, zb + wallH}};
                 for (const R& h : holes) {
                     std::vector<R> next;
                     for (const R& p : pieces) {
@@ -515,7 +547,15 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
                 }
                 bool painted = l > 0 && as.layers[l - 1].thickness < 0.001f;
                 painted = painted || (l + 1 < as.layers.size() && as.layers[l + 1].thickness < 0.001f);
-                for (const R& p : pieces) {
+                for (R p : pieces) {
+                    if (halfW) {   // cut the sheet off at the roof (and at the collar ceiling for interior finishes)
+                        float yA = alongX ? line : p.s0, yB = alongX ? line : p.s1;
+                        float roofZ = std::min(roofUnderside(yA), roofUnderside(yB));
+                        bool interiorFinish = std::string(m.id) == "gypsum_board";
+                        float cap = interiorFinish ? std::min(roofZ, zb + collarHeight) : roofZ;
+                        if (w.exterior && !alongX && interiorFinish && (0.5f * (p.s0 + p.s1) < kneeInset || 0.5f * (p.s0 + p.s1) > depth - kneeInset)) continue;
+                        p.z1 = std::min(p.z1, cap);
+                    }
                     if (p.s1 - p.s0 < 0.02f || p.z1 - p.z0 < 0.02f) continue;
                     float c[3];
                     if (alongX) { c[0] = 0.5f * (p.s0 + p.s1); c[1] = pos; } else { c[0] = pos; c[1] = 0.5f * (p.s0 + p.s1); }
@@ -533,20 +573,50 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
         int ai = top ? ceiling : floorCeiling;
         if (ai < 0) continue;
         const Assembly& as = lib.assemblies[ai];
-        float plane = storyBase(s) + H;
+        float plane = top ? topCeiling() : storyBase(s) + H;
+        float yLo = top && halfStory ? slopedRun() : 0.0f, yHi = top && halfStory ? depth - slopedRun() : depth;
         for (size_t l = 0; l < as.layers.size(); ++l) {
             const Layer& ly = as.layers[l];
             const Material& m = lib.materials[ly.material];
             if (ly.thickness < 0.001f || m.density < 50) continue;
             float zc = plane + layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
             int k = 0;
-            for (float y = 0; y < depth - 0.01f; y += SHEET_W)
+            for (float y = yLo; y < yHi - 0.01f; y += SHEET_W)
                 for (float x = 0; x < width - 0.01f; x += SHEET_L, ++k) {
-                    float xe = std::min(width, x + SHEET_L), ye = std::min(depth, y + SHEET_W);
+                    float xe = std::min(width, x + SHEET_L), ye = std::min(yHi, y + SHEET_W);
                     float c[3] = {0.5f * (x + xe), 0.5f * (y + ye), zc}, u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
                     add(m.name + " ceiling sheet " + std::to_string(k + 1) + ", painted", std::string(m.id) + " sheet", ly.material, s, c,
                         u, v, 0.5f * (xe - x), 0.5f * (ye - y), 0.5f * ly.thickness);
                 }
+        }
+    }
+
+    if (halfStory) {
+        // knee walls and sloped ceilings: painted gypsum on the room side
+        const int gyp = mat("gypsum_board");
+        const float t = 0.5f * IN, zTop = storyBase(stories - 1), kh = kneeWallHeight();
+        const float cosT = 1.0f / std::sqrt(1 + pitch * pitch), sinT = pitch * cosT;
+        int k = 0;
+        for (int side = 0; side < 2; ++side) {
+            float sgn = side == 0 ? 1.f : -1.f;
+            float yk = side == 0 ? kneeInset : depth - kneeInset;
+            float face = yk + sgn * (1.75f * IN + 0.5f * t);   // on the room side of the knee-wall studs
+            for (float x = 0; x < width - 0.01f; x += SHEET_L)
+                for (float z = 0; z < kh - 0.01f; z += SHEET_W) {   // sheets hung horizontally, ripped to height
+                    float xe = std::min(width, x + SHEET_L), ze = std::min(kh, z + SHEET_W);
+                    float c[3] = {0.5f * (x + xe), face, zTop + 0.5f * (z + ze)}, u[3] = {1, 0, 0}, v[3] = {0, 0, 1};
+                    add("Gypsum knee-wall sheet " + std::to_string(++k) + ", painted", "gypsum_board sheet", gyp, stories - 1, c, u, v,
+                        0.5f * (xe - x), 0.5f * (ze - z), 0.5f * t);
+                }
+            float len = (slopedRun() - kneeInset) / cosT;
+            float zA = roofUnderside(yk) - 0.5f * t / cosT;
+            for (float x = 0; x < width - 0.01f; x += SHEET_L) {
+                float xe = std::min(width, x + SHEET_L);
+                float c[3] = {0.5f * (x + xe), yk + sgn * 0.5f * len * cosT, zA + 0.5f * len * sinT};
+                float u[3] = {1, 0, 0}, v[3] = {0, sgn * cosT, sinT};
+                add("Gypsum sloped-ceiling sheet " + std::to_string(++k) + ", painted", "gypsum_board sheet", gyp, stories - 1, c, u, v,
+                    0.5f * (xe - x), 0.5f * len, 0.5f * t);
+            }
         }
     }
 

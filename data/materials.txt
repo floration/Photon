@@ -423,3 +423,39 @@ material paper
   offgas CH3OH 0.03
   source "dHc, soot: Tewarson, SFPE Handbook, cellulosic materials (verify); off-gas split PROTOTYPE (cellulose pyrolysis)"
 end
+
+material abs_plastic
+  name "ABS plastic (TV and appliance housings, liners)"
+  density 1050
+  conductivity 0.18
+  specific_heat 1500
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 600
+  heat_of_gasification 3.2e6
+  heat_of_combustion 30.0e6
+  soot_yield 0.105
+  aerosol_yield 0.03
+  char_yield 0.02
+  surface_depth 0.002
+  color 0.12 0.12 0.13
+  offgas STYRENE 0.35
+  offgas TAR 0.30
+  offgas C3H3N 0.12
+  offgas C6H6 0.08
+  offgas HCN 0.03
+  offgas CO 0.05
+  offgas CO2 0.07
+  source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, ABS (verify); off-gas split PROTOTYPE (styrene, acrylonitrile, butadiene fragments)"
+end
+
+material ceramic
+  name "Vitreous china (toilets, sinks, vanity tops)"
+  density 2300
+  conductivity 1.5
+  specific_heat 900
+  emissivity 0.9
+  combustible no
+  color 0.95 0.95 0.95
+  source "Typical whiteware ceramic properties (verify against SFPE Handbook appendix)"
+end

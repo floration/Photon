@@ -51,7 +51,7 @@ struct Item {
     std::vector<Part> parts;
 };
 
-enum class MemberKind { Stud, Plate, Header, TrussChord, TrussWeb, Gusset, Joist, Tread };
+enum class MemberKind { Stud, Plate, Header, TrussChord, TrussWeb, Gusset, Joist, Tread, Rafter, RidgeBoard, CollarTie };
 
 // Stair from story up to story+1: opening through the floor above plus treads.
 struct Stair {
@@ -124,6 +124,16 @@ struct Scene {
     int stories = 1;
     float floorDepth = 0.254f;                // joist + subfloor depth between stories (m)
     float joistSpacing = 0.406f, joistDepth = 0.235f;   // 2x10 @ 16 in o.c. by default
+    // Half story (Cape Cod / 1.5 story): the top story sits under stick-framed
+    // rafters with knee walls, sloped ceilings and a flat ceiling at the collar ties.
+    bool halfStory = false;
+    float plateHeight = 0.61f;     // exterior wall above the top-story floor where the rafters bear (m)
+    float kneeInset = 0.914f;      // knee wall distance in from each eave wall (m)
+    float collarHeight = 2.286f;   // flat ceiling height above the top-story floor (m)
+    float rafterSpacing = 0.406f;
+    int kneeWall = -1, slopedCeiling = -1;
+    float kneeWallHeight() const { return plateHeight + pitch * kneeInset; }
+    float slopedRun() const { return (collarHeight - plateHeight) / pitch; }   // eave wall to the collar line (plan)
     int floorCeiling = -1, subfloor = -1, joistMaterial = -1;
     int extWall = -1, ceiling = -1, roof = -1, soffit = -1, gable = -1, fascia = -1;
     int studMaterial = -1, trussMaterial = -1, gussetMaterial = -1;
@@ -138,7 +148,10 @@ struct Scene {
 
     bool load(const std::string& path, const MaterialLibrary& lib, std::string& err);
     float storyBase(int s) const { return s * (ceilingHeight + floorDepth); }
-    float roofBase() const { return storyBase(stories - 1) + ceilingHeight; }
+    float roofBase() const { return storyBase(stories - 1) + (halfStory ? plateHeight : ceilingHeight); }
+    float topCeiling() const { return storyBase(stories - 1) + (halfStory ? collarHeight : ceilingHeight); }
+    // underside of the roof deck framing (rafter / top chord bottom) at plan position y
+    float roofUnderside(float y) const { float run = y <= 0.5f * depth ? y : depth - y; return roofBase() + pitch * run; }
     float ridgeHeight() const { return roofBase() + pitch * depth * 0.5f; }
     int storyAt(float z) const;
     const Room* roomAt(float x, float y, float z) const;

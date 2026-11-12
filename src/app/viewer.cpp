@@ -133,6 +133,7 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     if (!lib_.loadMaterials(base + "data/materials.txt", err)) return false;
     if (!lib_.loadAssemblies(base + "data/assemblies.txt", err)) return false;
     if (!lib_.loadComponents(base + "data/components.txt", err)) return false;
+    if (!lib_.loadAssets(base + "data/assets.txt", err)) return false;
     std::string sp = scenePath;
     if (sp.find(':') == std::string::npos && sp.rfind('/', 0) != 0) sp = base + sp;
     if (!scene_.load(sp, lib_, err)) return false;
@@ -671,7 +672,8 @@ void Viewer::buildMeshes() {
     // attic cell they pass through
     bool showTruss = hideRoof_ || framing_;
     for (const Member& mb : scene_.members) {
-        bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb || mb.kind == MemberKind::Gusset;
+        bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb || mb.kind == MemberKind::Gusset ||
+                     mb.kind == MemberKind::Rafter || mb.kind == MemberKind::RidgeBoard || mb.kind == MemberKind::CollarTie;
         if (truss && !showTruss) continue;
         if (!truss && mb.kind != MemberKind::Tread && !framing_) continue;
         if (std::min(mb.p0[2], mb.p1[2]) >= zc) continue;
@@ -683,11 +685,13 @@ void Viewer::buildMeshes() {
         Vec3 side = normalize(Vec3(mb.side[0], mb.side[1], mb.side[2]));
         Vec3 t = normalize(cross(dn, side));
         const Material& m = lib_.materials[mb.material];
-        int segs = (mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb) ? std::max(1, (int)(L / 0.2f)) : 1;
+        bool burnable = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb || mb.kind == MemberKind::Rafter ||
+                        mb.kind == MemberKind::RidgeBoard || mb.kind == MemberKind::CollarTie;
+        int segs = burnable ? std::max(1, (int)(L / 0.2f)) : 1;
         for (int q = 0; q < segs; ++q) {
             Vec3 c = a + dir * ((q + 0.5f) / segs);
             Vec3 col(m.color[0], m.color[1], m.color[2]), e;
-            if (mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb) {
+            if (burnable) {
                 int cc = s.cellAt(c.x, c.y, c.z);
                 int i, j, k;
                 if (cc >= 0) {

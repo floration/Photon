@@ -106,3 +106,23 @@ assembly subfloor_osb
   leakage 0.0
   source "IRC Table R503.2.1.1(1) (verify); joists 2x10 @ 16 in o.c. per IRC Table R502.3.1(2) (verify span)"
 end
+
+assembly knee_wall_2x4
+  name "Knee wall: painted 1/2 in gypsum, 2x4 @ 16 in o.c. with R-13 batt, kraft facing toward the knee-wall attic"
+  layer latex_paint 0.0001
+  layer gypsum_board 0.0127
+  layer lumber_spf 0.0889 fill 0.094 r 2.29
+  leakage 0.0005                               # knee walls are notoriously leaky (access hatches, gaps)
+  source "IRC R602.3 / R702.3.5 (verify); knee-wall air leakage typical of Cape Cod construction (PROTOTYPE)"
+end
+
+assembly roof_sloped_ceiling
+  name "Sloped ceiling: painted 1/2 in gypsum on 2x8 rafters @ 16 in o.c. with R-30 batts, 7/16 in OSB deck, shingles"
+  layer latex_paint 0.0001
+  layer gypsum_board 0.0127
+  layer lumber_spf 0.184 fill 0.094 r 5.28     # 2x8 rafter bay (7-1/4 in) with R-30 batt
+  layer osb 0.0111
+  layer asphalt_shingle 0.0105
+  leakage 0.0
+  source "Rafter size per IRC Table R802.4.1 (verify span); R-30 in rafter bays per IRC N1102.2.2 (verify)"
+end
