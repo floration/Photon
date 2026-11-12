@@ -198,6 +198,8 @@ int runCase(int argc, char** argv) {
            << sim.pressureIters << "," << sim.pressureResidual << "," << sim.zoneP.size() << "," << sim.leakFaces << "\n";
     };
     auto t0 = std::chrono::steady_clock::now();
+    float ignEnd = 0;
+    for (const Ign& g : ignites) ignEnd = std::max(ignEnd, g.dur);
     float nextOut = resume.empty() ? 0 : std::floor(sim.time / outDt + 0.5f) * outDt + outDt;
     float nextCk = checkpoint > 0 ? std::floor(sim.time / checkpoint + 0.5f) * checkpoint + checkpoint : 1e30f;
     float nextPrint = std::floor(sim.time / 10 + 1) * 10;
@@ -209,7 +211,7 @@ int runCase(int argc, char** argv) {
         sim.step(std::max(1e-4f, target - sim.time));
         ++steps;
         if (sim.time >= nextOut - 1e-5f) { row(); nextOut += outDt; }
-        if (stopWhenOut && sim.time > 90.0f && sim.stats.hrr < 1000.0f && sim.stats.pyrolysis < 1e-5f) { std::printf("fire went out at %.1f s\n", sim.time); break; }
+        if (stopWhenOut && sim.time > 90.0f && sim.time > ignEnd + 30.0f && sim.stats.hrr < 1000.0f && sim.stats.pyrolysis < 1e-5f) { std::printf("fire went out at %.1f s\n", sim.time); break; }
         if (sim.time >= nextCk - 1e-5f) {
             std::string ck = prefix + "_" + std::to_string((int)std::lround(sim.time)) + "s.state";
             if (!sim.saveState(ck, err)) std::fprintf(stderr, "checkpoint: %s\n", err.c_str());
@@ -224,6 +226,18 @@ int runCase(int argc, char** argv) {
                         sim.pressureResidual, sim.zoneP.size(), wall * 1000 / steps);
             std::printf("          fuel in %.4f kg, burned %.4f, in grid %.4f, left the grid unburned %.4f\n", sim.stats.fuelIn,
                         sim.stats.fuelBurned, sim.stats.fuelInDomain, sim.stats.fuelIn - sim.stats.fuelBurned - sim.stats.fuelInDomain);
+            {   // hottest fuel surface per item (calibration diagnostics)
+                std::vector<float> hot(scene.items.size(), 0.0f);
+                std::vector<float> burn(scene.items.size(), 0.0f);
+                for (int c : sim.solidCells)
+                    if (sim.itemOf[c] >= 0) {
+                        hot[sim.itemOf[c]] = std::max(hot[sim.itemOf[c]], sim.fuelT[c] - 273.15f);
+                        burn[sim.itemOf[c]] = std::max(burn[sim.itemOf[c]], sim.burnFrac[c]);
+                    }
+                std::printf("          surfaces:");
+                for (size_t q = 0; q < hot.size(); ++q) if (hot[q] > 60) std::printf(" %s %.0f C (burning %.2f)", scene.items[q].name.c_str(), hot[q], burn[q]);
+                std::printf("\n");
+            }
             if (sim.maxVel > 15.0f) {   // locate the fastest face (stability diagnostics)
                 float best = 0; int ax = 0, bf = 0;
                 const std::vector<float>* V[3] = {&sim.u, &sim.v, &sim.w};

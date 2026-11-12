@@ -548,7 +548,10 @@ void Solver::solidsStep(float dt) {
                 // outer layer faces the flame (they shield each other): at most
                 // half the area of the cell's six faces (PROTOTYPE, tuned to NIST dry-tree peak HRR)
                 float areaB = bf * (blocked[c] ? perArea : std::min(perArea, 3.0f * A));
-                float hb = surfaceHeating(g, Tg, Tp, h, 1e-4f);
+                // a burning patch carries its own flame, whatever the 20 cm cell average
+                // says: full flame heat flux at the pyrolysis temperature (MODELED, as
+                // surfaceHeating: 1200 K, emissivity 0.3, h 15)
+                float hb = std::max(h * (Tg - Tp), 15.0f * (1200.0f - Tp) + 0.3f * SIGMA * (p4(1200.0f) - p4(Tp)));
                 float emitB = radiationOn ? m.emissivity * SIGMA * (p4(Tp) - p4(T0)) : 0.0f;
                 Pburn += areaB * (hb - emitB);
                 // the flame over a burning surface is fed by that surface: the gas
@@ -558,6 +561,19 @@ void Solver::solidsStep(float dt) {
             }
         }
         if (ng > 0) yoAvg /= ng;
+        // fuel touching a burning fuel cell (a pillow against a cushion, a cushion
+        // against the next one): the flame on the burning one licks across the
+        // seam the grid cannot resolve (MODELED, half contact)
+        if (blocked[c] && !adiabaticSurfaces && burnFrac[c] <= 0) {
+            for (int d = 0; d < 6; ++d) {
+                if ((d == 0 && i == 0) || (d == 1 && i == nx - 1) || (d == 2 && j == 0) || (d == 3 && j == ny - 1) ||
+                    (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
+                int n = c + off[d];
+                if (!blocked[n] || fuelMat[n] < 0 || burnFrac[n] <= 0 || fuelMass[n] <= 0) continue;
+                float fl = 15.0f * (1200.0f - Ts) + 0.3f * SIGMA * (p4(1200.0f) - p4(Ts));
+                flameTouch = std::max(flameTouch, 0.5f * burnFrac[n] * fl);
+            }
+        }
         // porous fuel is also touched by flames in the cells around it (a flame
         // below a tree's lowest branches)
         if (!blocked[c] && !adiabaticSurfaces) {

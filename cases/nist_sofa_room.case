@@ -4,9 +4,9 @@ photon_case 1
 title "Photon vs NIST sofa room flashover (barrier-fabric study, no barrier)"
 scene scenes/nist_sofa_room.txt
 profile realtime
-duration 420
+duration 600
 output out/nist_sofa
-ignite "Sofa" 0.5 30
+ignite "Pillow left" 1.0 120
 layer "ROOM" 1.85 1.85 0.0 2.4
 device temp "T_ceiling" 1.85 1.85 2.3
 stop_when_out

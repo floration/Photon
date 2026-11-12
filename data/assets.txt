@@ -392,3 +392,11 @@ asset christmas_tree_dry
   part dry_conifer  0.6  -9  -9 68   9  9 80
   part dry_conifer  0.2  -4  -4 80   4  4 88
 end
+
+asset throw_pillow
+  name "Throw pillow, 18 in, polyester cover and fill"
+  size 18 6 18
+  part fabric  0.12 -9 -3 0   9 3 18
+  part pu_foam 0.30 -8 -2 1   8 2 17
+  source "NIST barrier-fabric room tests used 45 cm polyester throw pillows (measured alone: 35-45 kW peak at 140-160 s, NIST FCD throwpillow1/2); masses PROTOTYPE, fill modeled as foam under the cover"
+end

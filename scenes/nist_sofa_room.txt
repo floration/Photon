@@ -37,3 +37,5 @@ place sofa_3seat    "Sofa"           6.07 10.6
 place coffee_table  "Coffee table"   6.07 7.2  rot 90
 place armchair      "Armchair"       1.6  5.5  rot 90
 place end_table     "End table"      11.0 11.0
+place throw_pillow  "Pillow left"     3.4  11.0  z 1.75
+place throw_pillow  "Pillow right"    8.7  11.0  z 1.75
