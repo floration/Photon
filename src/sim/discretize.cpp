@@ -6,15 +6,12 @@
 
 namespace photon {
 
-namespace {
-constexpr float MARGIN_XY = 1.2f;   // outside air around the eaves (m)
-constexpr float MARGIN_TOP = 1.4f;  // outside air above the ridge (m)
-} // namespace
 
 bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err) {
     scene = &sc;
     lib = &lb;
-    dx = 0.2f;
+    dx = profile.dx;
+    const float MARGIN_XY = profile.marginXY, MARGIN_TOP = profile.marginTop;
     ox = -MARGIN_XY;
     oy = -MARGIN_XY;
     oz = 0;
@@ -31,6 +28,14 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     fill(bx, NX, -1); fill(by, NY, -1); fill(bz, NZ, -1);
     fill(p, N, 0.f); fill(S, N, 0.f); fill(T, N, T0); fill(Yo, N, YO2_AMB);
     fill(Yf, N, 0.f); fill(Ys, N, 0.f); fill(Ya, N, 0.f); fill(Yp, N, 0.f);
+    fill(Yc, N, YCO2_AMB); fill(Yw, N, YH2O_AMB); fill(Yco, N, 0.f); fill(nu, N, 0.f);
+    fill(Pb, N, P0); fill(zone, N, -1); fill(massSrc, N, 0.f);
+    zoneP.clear(); zoneOpen.clear(); burners.clear();
+    fill(ax_, NX, 0.f); fill(ay_, NY, 0.f); fill(az_, NZ, 0.f);
+    fill(lx_, NX, (uint8_t)0); fill(ly_, NY, (uint8_t)0); fill(lz_, NZ, (uint8_t)0);
+    fill(cgR_, N, 0.f); fill(cgZ_, N, 0.f); fill(cgP_, N, 0.f); fill(cgQ_, N, 0.f);
+    zonesDirty_ = true;
+    maxVel = maxNu = 0;
     fill(Q, N, 0.f); fill(Qr, N, 0.f); fill(hrr, N, 0.f);
     fill(lit, N, (uint8_t)0); fill(pilot, N, (uint8_t)0);
     fill(blocked, N, (uint8_t)0); fill(porous, N, (uint8_t)0);

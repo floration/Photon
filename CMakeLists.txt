@@ -35,6 +35,9 @@ target_link_libraries(photon_scene PUBLIC photon_core)
 add_library(photon_sim STATIC
   src/sim/discretize.cpp
   src/sim/solver.cpp
+  src/sim/gasphase.cpp
+  src/sim/state.cpp
+  src/sim/fds_export.cpp
   src/sim/structure.cpp)
 target_link_libraries(photon_sim PUBLIC photon_scene)
 
@@ -60,7 +63,7 @@ if(MINGW)
 endif()
 
 # ---- headless runner: proves the solver builds without a window -------------
-add_executable(photon_cli src/app/cli.cpp)
+add_executable(photon_cli src/app/cli.cpp src/app/cli_case.cpp)
 target_link_libraries(photon_cli PRIVATE photon_sim)
 if(MINGW)
   target_link_options(photon_cli PRIVATE -static -static-libgcc -static-libstdc++)

@@ -18,7 +18,7 @@ constexpr float CHAR_DH = 25.0e6f;      // J/kg char oxidized
 constexpr float CHAR_O2 = 2.0f;         // kg O2 per kg char
 constexpr float BURNER_SOOT = 0.01f;    // soot yield of ignition-source fuel
 constexpr float T_MIN = 200.0f, T_MAX = 2300.0f;
-constexpr float VMAX = 25.0f;
+constexpr float LEAK_OPEN = 0.05f;      // open fraction at or above which a vent counts as an opening
 inline float sq(float a) { return a * a; }
 inline float p4(float a) { float b = a * a; return b * b; }
 } // namespace
@@ -88,6 +88,17 @@ void Solver::updateFace(int axis, int f) {
     }
     (axis == 0 ? fx : axis == 1 ? fy : fz)[f] = val;
     if (val == 0) (axis == 0 ? u : axis == 1 ? v : w)[f] = 0;
+    // An intact barrier with a small open fraction is a crack: its flow comes
+    // from the orifice equation, not the pressure solve. Vents and openings
+    // (open fraction >= LEAK_OPEN) join the pressure solve.
+    int bb = axis == 0 ? bx[f] : axis == 1 ? by[f] : bz[f];
+    bool leak = val > 0 && val < LEAK_OPEN && bb >= 0 && barrierIntact(bb);
+    float a = val > 0 && !leak ? val : 0.0f;
+    std::vector<float>& av = axis == 0 ? ax_ : axis == 1 ? ay_ : az_;
+    std::vector<uint8_t>& lv = axis == 0 ? lx_ : axis == 1 ? ly_ : lz_;
+    if (av[f] != a || lv[f] != (uint8_t)leak) zonesDirty_ = true;
+    av[f] = a;
+    lv[f] = (uint8_t)leak;
 }
 
 void Solver::updateCellFaces(int c) {
@@ -155,6 +166,14 @@ void Solver::removeLayer(int bi, int layer) {
     if (b.front > b.back) { b.failed = true; updateFace(b.axis, b.face); }
 }
 
+void Solver::clearLeakage() {
+    for (Barrier& b : barriers) {
+        if (b.leak <= 0 || b.leak >= LEAK_OPEN) continue;
+        b.leak = 0;
+        updateFace(b.axis, b.face);
+    }
+}
+
 void Solver::failBarrier(int bi) {
     if (bi < 0 || bi >= (int)barriers.size() || barriers[bi].failed) return;
     barriers[bi].failed = true;
@@ -193,21 +212,24 @@ float Solver::cellSpeed(int c) const {
 
 void Solver::addGasSpecies(int c, float fuelGen, float aerosol, float sootPot) {
     float m = gasDensity(c) * dx * dx * dx;
-    Yf[c] = std::min(1.0f, Yf[c] + fuelGen / m);
-    Ya[c] = std::min(1.0f, Ya[c] + aerosol / m);
-    Yp[c] = std::min(1.0f, Yp[c] + sootPot / m);
+    float madd = fuelGen + aerosol;
+    if (madd <= 0) return;
+    float mt = m + madd, sc = m / mt;
+    Yo[c] *= sc; Ys[c] *= sc; Yc[c] *= sc; Yw[c] *= sc; Yco[c] *= sc;
+    Yf[c] = Yf[c] * sc + fuelGen / mt;
+    Ya[c] = Ya[c] * sc + aerosol / mt;
+    Yp[c] = Yp[c] * sc + sootPot / mt;
+    massSrc[c] += madd;
 }
 
 // ---------------------------------------------------------------------------
 float Solver::step(float dtMax) {
     auto t0 = std::chrono::steady_clock::now();
-    // Upwind transport caps each cell's inflow fraction at 1, so a few fast
-    // leak faces must not drag the whole step down: floor the step at 10 ms.
-    float dt = std::min(dtMax, 0.8f * dx / std::max(maxVel, 0.5f));
-    dt = std::clamp(dt, 0.01f, 0.05f);
+    float dt = stableDt(dtMax);
+    if (zonesDirty_) computeZones();
 
     pool_->parallelFor(N, [&](int b, int e) {
-        for (int c = b; c < e; ++c) { Q[c] = 0; Qr[c] = 0; pilot[c] = 0; }
+        for (int c = b; c < e; ++c) { Q[c] = 0; Qr[c] = 0; pilot[c] = 0; massSrc[c] = 0; }
     }, 4096);
     for (int c : solidCells) radQ[c] = 0;
     for (Barrier& b : barriers) b.radIn[0] = b.radIn[1] = 0;
@@ -221,15 +243,24 @@ float Solver::step(float dtMax) {
     };
     mark(0);
     injectIgnitions(dt);
+    injectBurners(dt);
     combustion(dt);        mark(1);
     flameRadiation();      mark(2);
     solidsStep(dt);        mark(3);
     barriersStep(dt);      mark(4);
-    energyAndExpansion(dt);
-    buoyancy(dt);          mark(5);
-    advectVelocity(dt);    mark(6);
+    turbulence();
+    heatDiffusion(dt);
+    energyAndExpansion(dt); mark(5);
+    momentum(dt);          mark(6);
+    leakage(dt);
     project(dt);           mark(7);
     advectScalars(dt);     mark(8);
+    // closed zones: background pressure follows its rise rate
+    for (size_t z = 0; z < zoneP.size(); ++z)
+        if (!zoneOpen[z]) zoneP[z] = std::clamp(zoneP[z] + dt * zoneDP_[z], P0 - 20000.0f, P0 + 50000.0f);
+    pool_->parallelFor(N, [&](int b, int e) {
+        for (int c = b; c < e; ++c) if (zone[c] >= 0) Pb[c] = zoneP[zone[c]];
+    }, 4096);
     gatherStats(dt);       mark(9);
     ++phaseSteps;
     time += dt;
@@ -243,6 +274,7 @@ void Solver::injectIgnitions(float dt) {
         if (blocked[ig.cell]) continue;
         float mf = ig.power * dt / DHC_FUEL;
         addGasSpecies(ig.cell, mf, 0, mf * BURNER_SOOT);
+        stats.fuelIn += mf;
         pilot[ig.cell] = 1;
     }
 }
@@ -251,8 +283,9 @@ void Solver::injectIgnitions(float dt) {
 // temperature test for ignition and extinction (FDS-style, simplified).
 void Solver::combustion(float dt) {
     const float V = dx * dx * dx;
-    const float s = DHC_FUEL / DHC_O2;   // kg O2 per kg fuel
+    const float s = S_O2;                // kg O2 per kg fuel
     const float frac = 1.0f - std::exp(-dt / TAU_MIX);
+    const float chiR = radiationOn ? CHI_R : 0.0f;
     const int sx = 1, sy = nx, sz = nx * ny;
     auto& litNew = tmp_[0];
     pool_->parallelFor(N, [&](int b, int e) {
@@ -276,17 +309,23 @@ void Solver::combustion(float dt) {
             // critical flame temperature (the simple FDS 5 style criterion).
             float yoLim = 0.15f * std::clamp((T_CRIT - Tc) / (T_CRIT - T0), 0.0f, 1.0f);
             if (!pilot[c] && Yo[c] < yoLim) continue;
-            float m = P0 / (RS * Tc) * V;
+            float m = gasDensity(c) * V;
             float dmf = burnable * m * frac;
             float q = dmf * DHC_FUEL;
-            float sootMade = yf > 0 ? Yp[c] * (dmf / m) / yf : 0;
+            float sootMade = yf > 0 ? Yp[c] * (dmf / m) / yf : 0;   // mass fraction
+            float coMade = CO_YIELD * dmf / m;
+            float co2Made = std::max(0.0f, (C_FRAC * dmf / m - sootMade - (12.0f / 28.0f) * coMade) * (44.0f / 12.0f));
+            float o2Used = s * dmf / m - (32.0f / 12.0f) * sootMade - (16.0f / 28.0f) * coMade;
             Yf[c] = std::max(0.0f, yf - dmf / m);
-            Yo[c] = std::max(0.0f, Yo[c] - s * dmf / m);
+            Yo[c] = std::max(0.0f, Yo[c] - o2Used);
             Yp[c] = std::max(0.0f, Yp[c] - sootMade);
             Ys[c] += sootMade;
+            Yco[c] += coMade;
+            Yc[c] += co2Made;
+            Yw[c] += Y_H2O * dmf / m;
             Ya[c] *= (1.0f - frac);
-            Q[c] += q * (1.0f - CHI_R);
-            Qr[c] = q * CHI_R;
+            Q[c] += q * (1.0f - chiR);
+            Qr[c] = q * chiR;
             hrr[c] = q / (dt * V);
             litNew[c] = q > 1e-3f ? 1.0f : 0.0f;
         }
@@ -414,7 +453,10 @@ void Solver::unblockCell(int c) {
         if (nb[q] >= 0 && !blocked[nb[q]]) { sT += T[nb[q]]; sO += Yo[nb[q]]; n += 1; }
     T[c] = n > 0 ? sT / n : T0;
     Yo[c] = n > 0 ? sO / n : YO2_AMB;
-    Yf[c] = Ys[c] = Ya[c] = Yp[c] = 0;
+    Yf[c] = Ys[c] = Ya[c] = Yp[c] = Yco[c] = 0;
+    Yc[c] = YCO2_AMB;
+    Yw[c] = YH2O_AMB;
+    nu[c] = 0;
     updateCellFaces(c);
 }
 
@@ -473,10 +515,10 @@ void Solver::solidsStep(float dt) {
         for (int q = 0; q < ng; ++q) {
             int g = gas[q];
             float Tg = T[g];
-            float rho = P0 / (RS * Tg);
+            float rho = gasDensity(g);
             float epsG = 1.0f - std::exp(-(KAPPA_SOOT * rho * Ys[g] + KAPPA_GAS) * RAD_PATH);
             float h = H_CONV_MIN + 4.0f * cellSpeed(g);
-            float flux = h * (Tg - Ts) + m.emissivity * epsG * SIGMA * (p4(Tg) - p4(Ts));
+            float flux = adiabaticSurfaces ? 0.0f : h * (Tg - Ts) + m.emissivity * epsG * SIGMA * (p4(Tg) - p4(Ts));
             float e = flux * perArea * dt;
             Qs += e;
             Q[g] -= e;
@@ -491,7 +533,7 @@ void Solver::solidsStep(float dt) {
             Ts += dm * CHAR_DH / C;
             for (int q = 0; q < ng; ++q) {
                 int g = gas[q];
-                float mg = P0 / (RS * T[g]) * dx * dx * dx;
+                float mg = gasDensity(g) * dx * dx * dx;
                 Yo[g] = std::max(0.0f, Yo[g] - CHAR_O2 * dm / ng / mg);
             }
         }
@@ -561,10 +603,10 @@ void Solver::barriersStep(float dt) {
             }
             if (g[s] < 0) continue;
             float Tg = T[g[s]], Tn = b.T[s];
-            float rho = P0 / (RS * Tg);
+            float rho = gasDensity(g[s]);
             float epsG = 1.0f - std::exp(-(KAPPA_SOOT * rho * Ys[g[s]] + KAPPA_GAS) * RAD_PATH);
             float h = H_CONV_MIN + 4.0f * cellSpeed(g[s]);
-            flux[s] = h * (Tg - Tn) + m.emissivity * epsG * SIGMA * (p4(Tg) - p4(Tn));
+            flux[s] = adiabaticSurfaces ? 0.0f : h * (Tg - Tn) + m.emissivity * epsG * SIGMA * (p4(Tg) - p4(Tn));
             Q[g[s]] -= flux[s] * A * dt;
         }
         float e0 = (flux[0] * A * dt + b.radIn[0]) / A, e1 = (flux[1] * A * dt + b.radIn[1]) / A;  // J/m2
@@ -641,230 +683,21 @@ void Solver::barriersStep(float dt) {
     }
 }
 
-void Solver::energyAndExpansion(float dt) {
-    const float V = dx * dx * dx;
-    const float sFac = RS / (P0 * CP * V * dt);  // div u = q R / (P0 cp)
-    pool_->parallelFor(N, [&](int b, int e) {
-        for (int c = b; c < e; ++c) {
-            if (blocked[c]) { S[c] = 0; continue; }
-            float m = P0 / (RS * T[c]) * V;
-            T[c] = std::clamp(T[c] + Q[c] / (m * CP), T_MIN, T_MAX);
-            S[c] = std::clamp(Q[c] * sFac, -50.0f, 50.0f);
-        }
-    }, 4096);
-}
-
-// Buoyant acceleration on vertical face velocities, g (rho0 - rho) / rho0.
-void Solver::buoyancy(float dt) {
-    const int sz = nx * ny;
-    pool_->parallelFor(nz + 1, [&](int kb, int ke) {
-        for (int k = std::max(kb, 1); k < ke; ++k)
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int f = zface(i, j, k);
-                    if (fz[f] <= 0) continue;
-                    float Tlo = T[cell(i, j, k - 1)];
-                    float Thi = k < nz ? T[cell(i, j, k)] : T0;
-                    float Tf = 0.5f * (Tlo + Thi);
-                    w[f] += dt * G * (1.0f - T0 / Tf);
-                }
-        (void)sz;
-    });
-}
-
-namespace {
-inline float sampleGrid(const std::vector<float>& f, int gx, int gy, int gz, float x, float y, float z) {
-    x = std::clamp(x, 0.0f, (float)(gx - 1));
-    y = std::clamp(y, 0.0f, (float)(gy - 1));
-    z = std::clamp(z, 0.0f, (float)(gz - 1));
-    int i = std::min((int)x, gx - 2 < 0 ? 0 : gx - 2), j = std::min((int)y, gy - 2 < 0 ? 0 : gy - 2),
-        k = std::min((int)z, gz - 2 < 0 ? 0 : gz - 2);
-    float tx = x - i, ty = y - j, tz = z - k;
-    auto at = [&](int a, int b, int c) { return f[a + gx * (b + gy * c)]; };
-    float c00 = at(i, j, k) * (1 - tx) + at(i + 1, j, k) * tx;
-    float c10 = at(i, j + 1, k) * (1 - tx) + at(i + 1, j + 1, k) * tx;
-    float c01 = at(i, j, k + 1) * (1 - tx) + at(i + 1, j, k + 1) * tx;
-    float c11 = at(i, j + 1, k + 1) * (1 - tx) + at(i + 1, j + 1, k + 1) * tx;
-    return (c00 * (1 - ty) + c10 * ty) * (1 - tz) + (c01 * (1 - ty) + c11 * ty) * tz;
-}
-} // namespace
-
-// Semi-Lagrangian advection of the staggered velocity (positions in cell units).
-void Solver::advectVelocity(float dt) {
-    const float s = dt / dx;
-    // u: grid (nx+1, ny, nz) at (i, j+.5, k+.5)
-    auto U = [&](float x, float y, float z) { return sampleGrid(u, nx + 1, ny, nz, x, y - 0.5f, z - 0.5f); };
-    auto Vv = [&](float x, float y, float z) { return sampleGrid(v, nx, ny + 1, nz, x - 0.5f, y, z - 0.5f); };
-    auto W = [&](float x, float y, float z) { return sampleGrid(w, nx, ny, nz + 1, x - 0.5f, y - 0.5f, z); };
-    pool_->parallelFor(nz, [&](int kb, int ke) {
-        for (int k = kb; k < ke; ++k)
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i <= nx; ++i) {
-                    int f = xface(i, j, k);
-                    if (fx[f] <= 0) { u2_[f] = 0; continue; }
-                    float x = (float)i, y = j + 0.5f, z = k + 0.5f;
-                    float bx_ = x - s * u[f], by_ = y - s * Vv(x, y, z), bz_ = z - s * W(x, y, z);
-                    u2_[f] = U(bx_, by_, bz_);
-                }
-        for (int k = kb; k < ke; ++k)
-            for (int j = 0; j <= ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int f = yface(i, j, k);
-                    if (fy[f] <= 0) { v2_[f] = 0; continue; }
-                    float x = i + 0.5f, y = (float)j, z = k + 0.5f;
-                    float bx_ = x - s * U(x, y, z), by_ = y - s * v[f], bz_ = z - s * W(x, y, z);
-                    v2_[f] = Vv(bx_, by_, bz_);
-                }
-    });
-    pool_->parallelFor(nz + 1, [&](int kb, int ke) {
-        for (int k = kb; k < ke; ++k)
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int f = zface(i, j, k);
-                    if (fz[f] <= 0) { w2_[f] = 0; continue; }
-                    float x = i + 0.5f, y = j + 0.5f, z = (float)k;
-                    float bx_ = x - s * U(x, y, z), by_ = y - s * Vv(x, y, z), bz_ = z - s * w[f];
-                    w2_[f] = W(bx_, by_, bz_);
-                }
-    });
-    u.swap(u2_);
-    v.swap(v2_);
-    w.swap(w2_);
-}
-
-// Pressure projection: sum_f a_f (p_n - p_c) = (div u* - S) dx^2 / dt with
-// red-black SOR, open boundaries held at p = 0, warm-started each step.
-void Solver::project(float dt) {
-    const float inv = dx * dx / dt;
-    pool_->parallelFor(nz, [&](int kb, int ke) {
-        for (int k = kb; k < ke; ++k)
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int c = cell(i, j, k);
-                    if (blocked[c]) { rhs_[c] = 0; continue; }
-                    int a0 = xface(i, j, k), a1 = a0 + 1, b0 = yface(i, j, k), b1 = yface(i, j + 1, k), c0 = zface(i, j, k),
-                        c1 = zface(i, j, k + 1);
-                    float div = (fx[a1] * u[a1] - fx[a0] * u[a0] + fy[b1] * v[b1] - fy[b0] * v[b0] + fz[c1] * w[c1] -
-                                 fz[c0] * w[c0]) / dx;
-                    rhs_[c] = (div - S[c]) * inv;
-                }
-    });
-    const float omega = 1.8f;
-    const int rows = ny * nz;
-    for (int it = 0; it < pressureIters; ++it) {
-        for (int color = 0; color < 2; ++color) {
-            pool_->parallelFor(rows, [&](int rb, int re) {
-                for (int r = rb; r < re; ++r) {
-                    int j = r % ny, k = r / ny;
-                    int i0 = (j + k + color) & 1;
-                    for (int i = i0; i < nx; i += 2) {
-                        int c = cell(i, j, k);
-                        if (blocked[c]) continue;
-                        int a0 = xface(i, j, k), a1 = a0 + 1, b0 = yface(i, j, k), b1 = yface(i, j + 1, k),
-                            c0 = zface(i, j, k), c1 = zface(i, j, k + 1);
-                        float fa0 = fx[a0], fa1 = fx[a1], fb0 = fy[b0], fb1 = fy[b1], fc0 = fz[c0], fc1 = fz[c1];
-                        float diag = fa0 + fa1 + fb0 + fb1 + fc0 + fc1;
-                        if (diag <= 0) continue;
-                        float sum = 0;
-                        if (i > 0) sum += fa0 * p[c - 1];
-                        if (i < nx - 1) sum += fa1 * p[c + 1];
-                        if (j > 0) sum += fb0 * p[c - nx];
-                        if (j < ny - 1) sum += fb1 * p[c + nx];
-                        if (k > 0) sum += fc0 * p[c - nx * ny];
-                        if (k < nz - 1) sum += fc1 * p[c + nx * ny];
-                        float pn = (sum - rhs_[c]) / diag;
-                        p[c] += omega * (pn - p[c]);
-                    }
-                }
-            });
-        }
-    }
-    const float s = dt / dx;
-    auto P = [&](int i, int j, int k) -> float {
-        if (i < 0 || j < 0 || i >= nx || j >= ny || k >= nz) return 0.0f;  // open boundary
-        return p[cell(i, j, k)];
-    };
-    std::vector<float> vmaxPart(nz + 1, 0.0f);
-    pool_->parallelFor(nz, [&](int kb, int ke) {
-        for (int k = kb; k < ke; ++k) {
-            float vm = 0;
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i <= nx; ++i) {
-                    int f = xface(i, j, k);
-                    if (fx[f] <= 0) { u[f] = 0; continue; }
-                    u[f] = std::clamp(u[f] - s * (P(i, j, k) - P(i - 1, j, k)), -VMAX, VMAX);
-                    vm = std::max(vm, std::fabs(u[f]) * fx[f]);
-                }
-            for (int j = 0; j <= ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int f = yface(i, j, k);
-                    if (fy[f] <= 0) { v[f] = 0; continue; }
-                    v[f] = std::clamp(v[f] - s * (P(i, j, k) - P(i, j - 1, k)), -VMAX, VMAX);
-                    vm = std::max(vm, std::fabs(v[f]) * fy[f]);
-                }
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int f = zface(i, j, k + 1);
-                    if (fz[f] <= 0) { w[f] = 0; continue; }
-                    w[f] = std::clamp(w[f] - s * (P(i, j, k + 1) - P(i, j, k)), -VMAX, VMAX);
-                    vm = std::max(vm, std::fabs(w[f]) * fz[f]);
-                }
-            vmaxPart[k] = vm;
-        }
-    });
-    maxVel = *std::max_element(vmaxPart.begin(), vmaxPart.end());
-}
-
-// First-order upwind transport (advective form) of the cell scalars. Fluxes
-// only pass through open face area, so nothing leaks through intact barriers.
-void Solver::advectScalars(float dt) {
-    std::vector<float>* fields[6] = {&T, &Yo, &Yf, &Ys, &Ya, &Yp};
-    const float amb[6] = {T0, YO2_AMB, 0, 0, 0, 0};
-    const float s = dt / dx;
-    pool_->parallelFor(nz, [&](int kb, int ke) {
-        for (int k = kb; k < ke; ++k)
-            for (int j = 0; j < ny; ++j)
-                for (int i = 0; i < nx; ++i) {
-                    int c = cell(i, j, k);
-                    if (blocked[c]) {
-                        for (int q = 0; q < 6; ++q) tmp_[q][c] = (*fields[q])[c];
-                        continue;
-                    }
-                    int fa0 = xface(i, j, k), fa1 = fa0 + 1, fb0 = yface(i, j, k), fb1 = yface(i, j + 1, k),
-                        fc0 = zface(i, j, k), fc1 = zface(i, j, k + 1);
-                    float win[6] = {fx[fa0] * std::max(u[fa0], 0.0f) * s, fx[fa1] * std::max(-u[fa1], 0.0f) * s,
-                                    fy[fb0] * std::max(v[fb0], 0.0f) * s, fy[fb1] * std::max(-v[fb1], 0.0f) * s,
-                                    fz[fc0] * std::max(w[fc0], 0.0f) * s, fz[fc1] * std::max(-w[fc1], 0.0f) * s};
-                    int nb[6] = {i > 0 ? c - 1 : -1, i < nx - 1 ? c + 1 : -1, j > 0 ? c - nx : -1, j < ny - 1 ? c + nx : -1,
-                                 k > 0 ? c - nx * ny : -1, k < nz - 1 ? c + nx * ny : -1};
-                    float wsum = win[0] + win[1] + win[2] + win[3] + win[4] + win[5];
-                    float scale = wsum > 1.0f ? 1.0f / wsum : 1.0f;
-                    for (int q = 0; q < 6; ++q) {
-                        const std::vector<float>& F = *fields[q];
-                        float fc = F[c], acc = 0;
-                        for (int d = 0; d < 6; ++d) {
-                            if (win[d] <= 0) continue;
-                            float fn = nb[d] >= 0 ? F[nb[d]] : amb[q];
-                            acc += win[d] * (fn - fc);
-                        }
-                        tmp_[q][c] = fc + acc * scale;
-                    }
-                }
-    });
-    for (int q = 0; q < 6; ++q) fields[q]->swap(tmp_[q]);
-}
-
 void Solver::gatherStats(float dt) {
     const float V = dx * dx * dx;
     float h = 0, mt = T0;
     int nb = 0;
+    double fd = 0;
     for (int c = 0; c < N; ++c) {
         if (blocked[c]) continue;
+        fd += (double)Yf[c] * gasDensity(c) * V;
         h += hrr[c] * V;
         if (T[c] > mt) mt = T[c];
         if (hrr[c] > 0) ++nb;
     }
     stats.hrr = h;
+    stats.fuelBurned += (double)h * dt / DHC_FUEL;
+    stats.fuelInDomain = fd;
     stats.maxGasT = mt;
     stats.burningCells = nb;
     stats.failedWindows = stats.failedCeilings = stats.failedDoors = stats.roofHoles = 0;

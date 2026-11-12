@@ -1,0 +1,26 @@
+photon_case 1
+# Phase 3 gas-phase verification: 100 kW burner in the ISO 9705 size room,
+# doorway open, adiabatic surfaces, no radiation, no leakage, so the only
+# physics is gas flow, buoyancy, mixing and combustion of a gas burner.
+# Compared against FDS on the same grid (photon_cli --case ... --export-fds).
+title "Photon Phase 3: 100 kW burner in an ISO 9705 size room"
+scene scenes/room_burner.txt
+profile realtime
+duration 120
+output out/room_burner_rt
+adiabatic
+no_radiation
+no_leakage
+# 0.4 m square burner on the floor at the back of the room, 100 kW after a 20 s t-squared ramp
+burner "Gas burner" 3.0 1.0 3.4 1.4 0.0 100 20
+# thermocouple tree in the front corner and at the room center
+tree "TC_corner" 0.5 0.5 0.1 2.3 0.2
+tree "TC_center" 1.8 1.2 0.1 2.3 0.2
+# doorway: velocity and temperature on its centerline (door plane x = 0, inside face)
+vprofile "V_door" u 0.0 1.2 0.1 1.9 0.2
+tree "TC_door" 0.1 1.2 0.1 1.9 0.2
+layer "LAYER" 1.8 1.2 0.0 2.4
+device o2 "O2_upper" 1.8 1.2 2.1
+device co2 "CO2_upper" 1.8 1.2 2.1
+device w "W_plume" 3.2 1.2 1.5
+device temp "T_plume" 3.2 1.2 1.5

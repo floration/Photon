@@ -100,7 +100,10 @@ static int runJob(const std::string& jobPath) {
     return 0;
 }
 
+int runCase(int argc, char** argv);   // cli_case.cpp
+
 int main(int argc, char** argv) {
+    if (argc > 2 && std::string(argv[1]) == "--case") return runCase(argc, argv);
     if (argc > 2 && std::string(argv[1]) == "--job") return runJob(argv[2]);
     std::string scenePath = argc > 1 ? argv[1] : "scenes/model_home.txt";
     float seconds = argc > 2 ? (float)std::atof(argv[2]) : 300.0f;

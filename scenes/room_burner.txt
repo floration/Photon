@@ -1,0 +1,32 @@
+photon_scene 1
+# Phase 3 verification room, the size of the ISO 9705 room corner test room:
+# 3.6 m x 2.4 m floor, 2.4 m ceiling, one 0.8 m wide doorway (about 2.0 m
+# tall) centered in a 2.4 m end wall. Empty: the fire is a prescribed gas
+# burner given in the case file (cases/room_burner.case). Gable roof with a
+# closed attic above the ceiling. Coordinates in feet (scene convention).
+
+name "Verification room - ISO 9705 size, burner only"
+units ft
+
+footprint 11.811 7.874
+stories 1
+ceiling_height 7.874
+roof_pitch 6 12
+eave_overhang 1.0
+truss_spacing 2
+stud_spacing 1.333
+attic_vent_ratio 150
+
+assembly_ext_wall ext_wall_2x4
+assembly_ceiling ceiling_r38
+assembly_roof roof_osb_shingle
+assembly_soffit soffit_vinyl_vented
+assembly_gable gable_wall
+assembly_fascia fascia_wood
+stud_material lumber_spf
+truss_material lumber_spf
+gusset_material steel
+
+story 1
+room "Burn room"  0 0 11.811 7.874
+door ext_door_solid "Doorway"  0 2.625 0 5.249  open

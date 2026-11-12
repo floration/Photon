@@ -405,6 +405,167 @@ TEST(structure_stable_then_collapses) {
     CHECK_MSG(deck > 0 && deckDown > deck / 2, std::to_string(deckDown) + " of " + std::to_string(deck) + " deck panels fell");
 }
 
+// ------------------------------------------------------------ gas phase --
+// Phase 3 verification on the small ISO 9705 size room (scenes/room_burner.txt).
+namespace {
+struct RoomWorld {
+    Scene scene;
+    std::string err;
+    bool ok = false;
+    RoomWorld() { ok = world().ok && scene.load("scenes/room_burner.txt", world().lib, err); }
+};
+RoomWorld& roomWorld() { static RoomWorld r; return r; }
+
+// gas-only room: adiabatic, no radiant loss, cracks closed
+bool buildRoom(Solver& s, bool doorOpen) {
+    RoomWorld& r = roomWorld();
+    if (!r.ok) return false;
+    s.radiationOn = false;
+    s.adiabaticSurfaces = true;
+    std::string err;
+    if (!s.build(r.scene, world().lib, err)) return false;
+    s.clearLeakage();
+    // the scene has the doorway open; close it for sealed-room tests
+    if (!doorOpen)
+        for (size_t o = 0; o < r.scene.openings.size(); ++o)
+            if (r.scene.openings[o].name == "Doorway") s.toggleOpening((int)o);
+    return true;
+}
+int roomCell(const Solver& s) { return s.cellAt(1.8f, 1.2f, 1.2f); }
+} // namespace
+
+TEST(still_air_stays_still) {
+    Solver s;
+    CHECK(buildRoom(s, true));
+    for (int i = 0; i < 40; ++i) s.step(0.05f);
+    CHECK_MSG(s.maxVel < 1e-3f, "max velocity " + std::to_string(s.maxVel) + " m/s with no fire");
+    float dT = 0;
+    for (int c = 0; c < s.N; ++c) if (!s.blocked[c]) dT = std::max(dT, std::fabs(s.T[c] - Solver::T0));
+    CHECK_MSG(dT < 1e-3f, "temperature drifted " + std::to_string(dT) + " K");
+}
+
+// A sealed, adiabatic room: every joule stays in the gas, so the background
+// pressure must rise by (gamma - 1) Q / V (plus the added fuel gas), and
+// nothing may leave the room.
+TEST(sealed_room_pressure_rise) {
+    Solver s;
+    CHECK(buildRoom(s, false));
+    int c = roomCell(s);
+    CHECK(c >= 0 && s.zone[c] < 0);   // zones are computed on the first step
+    Burner b;
+    b.x0 = 1.6f; b.y0 = 1.0f; b.x1 = 2.0f; b.y1 = 1.4f; b.z = 0; b.peakW = 20e3f; b.label = "test";
+    CHECK(s.addBurner(b) >= 0);
+    double heat = 0;
+    for (int i = 0; i < 60; ++i) { float dt = s.step(0.05f); heat += s.stats.hrr * dt; }
+    int z = s.zone[c];
+    CHECK(z >= 0 && !s.zoneOpen[z]);
+    double V = s.zoneVolume(z);
+    double dpExpect = (Solver::GAMMA - 1) * heat / V;
+    double dp = s.Pb[c] - Solver::P0;
+    CHECK(heat > 0);
+    CHECK_MSG(std::fabs(dp - dpExpect) < 0.08 * dpExpect,
+              "pressure rise " + std::to_string(dp) + " Pa, expected " + std::to_string(dpExpect) + " Pa from " +
+              std::to_string(heat / 1000) + " kJ in " + std::to_string(V) + " m3");
+    // nothing escaped: no smoke outside the room's zone
+    double outside = 0, inside = 0;
+    for (int q = 0; q < s.N; ++q) {
+        if (s.blocked[q]) continue;
+        (s.zone[q] == z ? inside : outside) += s.Yc[q] - Solver::YCO2_AMB;
+    }
+    CHECK_MSG(outside < 1e-6 * std::max(1.0, inside), "CO2 outside the sealed room");
+}
+
+// Fuel mass: what the burner released = burned + still in the grid + carried
+// out of the open boundary. With everything well ventilated and the outflow
+// fully burned, the unaccounted part is transport error.
+TEST(fuel_mass_balance) {
+    Solver s;
+    CHECK(buildRoom(s, true));
+    Burner b;
+    b.x0 = 3.0f; b.y0 = 1.0f; b.x1 = 3.4f; b.y1 = 1.4f; b.z = 0; b.peakW = 100e3f; b.label = "test";
+    CHECK(s.addBurner(b) >= 0);
+    while (s.time < 15.0f) s.step(0.05f);
+    double lost = s.stats.fuelIn - s.stats.fuelBurned - s.stats.fuelInDomain;
+    CHECK(s.stats.fuelIn > 0);
+    CHECK_MSG(std::fabs(lost) < 0.05 * s.stats.fuelIn,
+              "fuel unaccounted " + std::to_string(100 * lost / s.stats.fuelIn) + "% of " + std::to_string(s.stats.fuelIn) + " kg");
+}
+
+// A burner in the room with the doorway open: hot gas leaves high, fresh air
+// enters low, and the layer forms near the ceiling (neutral plane in the doorway).
+TEST(doorway_two_way_flow) {
+    Solver s;
+    CHECK(buildRoom(s, true));
+    Burner b;
+    b.x0 = 3.0f; b.y0 = 1.0f; b.x1 = 3.4f; b.y1 = 1.4f; b.z = 0; b.peakW = 100e3f; b.label = "test";
+    CHECK(s.addBurner(b) >= 0);
+    while (s.time < 25.0f) s.step(0.05f);
+    // the doorway is in the x = 0 wall, y 0.8 .. 1.6 m; inside face cell x = 0.1
+    auto uAt = [&](float z) {
+        int c = s.cellAt(0.1f, 1.2f, z);
+        int i, j, k;
+        s.cellIJK(c, i, j, k);
+        return s.u[s.xface(i, j, k)];   // face in the door plane, + = into the room
+    };
+    float low = uAt(0.3f), high = uAt(1.8f);
+    CHECK_MSG(low > 0.1f, "inflow at 0.3 m: " + std::to_string(low) + " m/s");
+    CHECK_MSG(high < -0.1f, "outflow at 1.8 m: " + std::to_string(high) + " m/s");
+    float tLow = s.T[s.cellAt(1.8f, 1.2f, 0.3f)], tHigh = s.T[s.cellAt(1.8f, 1.2f, 2.2f)];
+    CHECK_MSG(tHigh > tLow + 50, "upper " + std::to_string(tHigh - 273.15f) + " C, lower " + std::to_string(tLow - 273.15f) + " C");
+}
+
+// Save at t, continue; a fresh solver loaded from the file must follow the
+// exact same path (handoff R14 / Phase 3 gate: a resumed run matches).
+TEST(resume_matches_uninterrupted) {
+    Solver a(4);
+    CHECK(buildRoom(a, true));
+    Burner b;
+    b.x0 = 3.0f; b.y0 = 1.0f; b.x1 = 3.4f; b.y1 = 1.4f; b.z = 0; b.peakW = 60e3f; b.rampS = 5; b.label = "test";
+    CHECK(a.addBurner(b) >= 0);
+    for (int i = 0; i < 60; ++i) a.step(0.05f);
+    std::string err, path = "photon_test_resume.state";
+    CHECK_MSG(a.saveState(path, err), err);
+    for (int i = 0; i < 60; ++i) a.step(0.05f);
+    Solver r(4);
+    CHECK(buildRoom(r, true));
+    CHECK_MSG(r.loadState(path, err), err);
+    for (int i = 0; i < 60; ++i) r.step(0.05f);
+    std::remove(path.c_str());
+    CHECK(a.time == r.time);
+    size_t diff = 0;
+    for (int c = 0; c < a.N; ++c) diff += a.T[c] != r.T[c] || a.Yf[c] != r.Yf[c] || a.Ys[c] != r.Ys[c] || a.p[c] != r.p[c];
+    for (size_t f = 0; f < a.u.size(); ++f) diff += a.u[f] != r.u[f];
+    CHECK_MSG(diff == 0, std::to_string(diff) + " values differ after resume");
+    // a state refuses to load into a different grid
+    Solver other(4);
+    other.profile.dx = 0.25f;
+    CHECK(buildRoom(other, true));
+    CHECK_MSG(a.saveState(path, err), err);
+    CHECK(!other.loadState(path, err));
+    std::remove(path.c_str());
+}
+
+// Wind: outside air moves at the profile speed, the house blocks it, and the
+// field stays bounded.
+TEST(wind_flows_around_building) {
+    Solver s;
+    s.wind.speed = 5.0f;
+    s.wind.fromDeg = 270.0f;   // from the west: blows toward +x
+    CHECK(buildRoom(s, false));
+    for (int i = 0; i < 80; ++i) s.step(0.05f);
+    int c = s.cellAt(s.ox + 0.5f * s.dx, 1.2f, 4.5f);   // windward edge, above the roof
+    int i, j, k;
+    s.cellIJK(c, i, j, k);
+    float uIn = s.u[s.xface(i, j, k)];
+    float expect = 5.0f * std::pow(4.5f / 10.0f, 0.25f);
+    CHECK_MSG(std::fabs(uIn - expect) < 0.05f * expect, "inflow " + std::to_string(uIn) + " m/s");
+    CHECK_MSG(s.maxVel < 12.0f, "max velocity " + std::to_string(s.maxVel));
+    // closed room stays still inside
+    int in = roomCell(s);
+    s.cellIJK(in, i, j, k);
+    CHECK_MSG(std::fabs(s.u[s.xface(i, j, k)]) < 0.05f, "wind inside the closed room");
+}
+
 int main(int argc, char** argv) {
     const char* filter = argc > 1 ? argv[1] : nullptr;
     int run = 0;
