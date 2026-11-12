@@ -189,7 +189,8 @@ material pu_foam
   char_yield 0.05
   surface_depth 0.005
   color 0.85 0.80 0.45
-  spread_rate 0.005 0.05      # covered upholstery: mm/s sideways, cm/s upward (PROTOTYPE, verify vs NIST sofa burns)
+  spread_rate 0.002 0.02      # covered upholstery: mm/s sideways, cm/s upward (PROTOTYPE, verify vs NIST sofa burns)
+  melt_burn_area 0.4          # flexible PU foam collapses into a burning melt pool (calibrated to NIST sofa-room growth, verify)
   source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, flexible polyurethane foams GM21-GM27 (verify)"
   source "density: typical upholstery grade 1.8 lb/ft3 (verify against NIST TN 2303 items)"
   offgas TDI 0.25  # first stage: isocyanate, yellow smoke
@@ -217,7 +218,7 @@ material fabric
   char_yield 0.10
   surface_depth 0.002
   color 0.35 0.42 0.62
-  spread_rate 0.005 0.05
+  spread_rate 0.002 0.02
   source "PROTOTYPE blend of Tewarson cotton and polyester values (SFPE Handbook, verify)"
   offgas TAR 0.45
   offgas H2O 0.15
@@ -303,13 +304,14 @@ material latex_paint
   emissivity 0.9
   combustible yes
   pyrolysis_temp 600
-  heat_of_gasification 2.0e6
+  heat_of_gasification 6.0e6   # effective: the film burns on a cold gypsum substrate; cone tests of painted gypsum show HRR/irradiance ~2-3 (verify)
   heat_of_combustion 20.0e6
   soot_yield 0.03
   aerosol_yield 0.05
   char_yield 0.50        # pigments and fillers (TiO2, CaCO3) stay behind
   surface_depth 0.0001
   color 0.85 0.83 0.78   # display default; rooms set their own paint color
+  critical_flux 25000         # painted gypsum ignites at ~25-35 kW/m2 in cone tests (verify)
   source "PROTOTYPE: dry film ~0.1 mm for two coats; acrylic binder burning values from Tewarson PMMA-class polymers, derated for pigment (verify)"
   offgas MMA 0.50
   offgas TAR 0.25
@@ -534,6 +536,7 @@ material polyester_fill
   surface_depth 0.002
   spread_rate 0.003 0.03
   color 0.95 0.95 0.92
+  melt_burn_area 0.3          # PET melts into a slumping mass; calibrated to NIST throw-pillow peak HRR (35-45 kW)
   source "PET: dHc, soot yield Tewarson SFPE Handbook (verify); decomposition peak ~700 K (TGA of PET, verify); fiberfill density typical 20-30 kg/m3"
   offgas TAR 0.40
   offgas C2H4O2 0.15
@@ -561,6 +564,7 @@ material polyester_fabric
   surface_depth 0.002
   spread_rate 0.003 0.03
   color 0.55 0.42 0.38
+  melt_burn_area 0.3          # PET melts into a slumping mass; calibrated to NIST throw-pillow peak HRR (35-45 kW)
   source "PET values as polyester_fill (Tewarson SFPE Handbook, verify); woven fabric density typical 300-400 kg/m3"
   offgas TAR 0.40
   offgas C2H4O2 0.15

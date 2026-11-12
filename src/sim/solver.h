@@ -143,6 +143,7 @@ struct SimStats {
     float maxGasT = 293.15f; // K
     float maxSolidT = 293.15f; // K, hottest solid or porous fuel
     int hotCell = -1;
+    double liningHeat = 0;   // J of fuel-gas energy given off by walls, ceilings, floors (linings)
     float pyrolysis = 0;     // kg/s total off-gas production
     int burningCells = 0;
     int failedWindows = 0, failedCeilings = 0, failedDoors = 0, roofHoles = 0;

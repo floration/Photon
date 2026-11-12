@@ -126,3 +126,23 @@ assembly roof_sloped_ceiling
   leakage 0.0
   source "Rafter size per IRC Table R802.4.1 (verify span); R-30 in rafter bays per IRC N1102.2.2 (verify)"
 end
+
+assembly lab_wall
+  name "Fire-test room wall: painted 2 x 5/8 in Type X gypsum on steel studs, block backing (non-combustible lab compartment)"
+  layer latex_paint 0.0001
+  layer gypsum_board 0.0159
+  layer gypsum_board 0.0159
+  layer concrete 0.1
+  leakage 0.0
+  source "Typical large-scale fire test room construction (NIST NFRL compartments are gypsum-lined); layer set PROTOTYPE, verify against the NIST barrier-fabric test report"
+end
+
+assembly lab_ceiling
+  name "Fire-test room ceiling: painted 2 x 5/8 in Type X gypsum under a concrete deck"
+  layer latex_paint 0.0001
+  layer gypsum_board 0.0159
+  layer gypsum_board 0.0159
+  layer concrete 0.1
+  leakage 0.0
+  source "As lab_wall (PROTOTYPE, verify)"
+end

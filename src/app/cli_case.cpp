@@ -204,14 +204,18 @@ int runCase(int argc, char** argv) {
     if (resume.empty()) {
         ic << "Time";
         for (const Item& it : scene.items) ic << "," << it.name;
+        ic << ",Linings";
         ic << "\n";
     }
     std::vector<double> lastHeat(sim.itemHeat);
+    double lastLining = sim.stats.liningHeat;
     float lastT = sim.time;
     auto row = [&] {
         float dtr = std::max(1e-6f, sim.time - lastT);
         ic << sim.time;
         for (size_t q = 0; q < sim.itemHeat.size(); ++q) ic << "," << (sim.itemHeat[q] - lastHeat[q]) / dtr / 1000.0;
+        ic << "," << (sim.stats.liningHeat - lastLining) / dtr / 1000.0;
+        lastLining = sim.stats.liningHeat;
         ic << "\n";
         lastHeat = sim.itemHeat;
         lastT = sim.time;

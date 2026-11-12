@@ -139,6 +139,8 @@ bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
         else if (k == "surface_depth") dst = &cur->surfaceDepth;
         else if (k == "porous_area") dst = &cur->porousArea;
         else if (k == "pyrolysis_range") dst = &cur->pyrolysisRange;
+        else if (k == "melt_burn_area") dst = &cur->meltBurnArea;
+        else if (k == "critical_flux") dst = &cur->criticalFlux;
         else if (k == "fail_temp") dst = &cur->failTemp;
         else if (k == "fail_time") dst = &cur->failTime;
         else if (k == "design_fb") dst = &cur->designFb;

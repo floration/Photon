@@ -49,6 +49,10 @@ struct Material {
     // mass-loss rate peaks at pyrolysis_temp in a 5 K/min TGA run and spans
     // pyrolysis_range kelvin (A and E derived as in the FDS User Guide).
     float pyrolysisRange = 80.0f;
+    // Thermoplastics melt and slump as they burn: the flaming area is this
+    // fraction of the item's outline (1 = chars in place, like wood).
+    float meltBurnArea = 1.0f;
+    float criticalFlux = 0;         // W/m2 a lining needs to keep burning (0 = none)
     // Non-combustible failure (fall-off, crack-out, melt); 0 = never
     float failTemp = 0;             // K
     float failTime = 0;             // s above failTemp before the layer is gone

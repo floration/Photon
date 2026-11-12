@@ -565,7 +565,9 @@ void Solver::solidsStep(float dt) {
                 // burning area: for fuel spread through a cell (needles) only the
                 // outer layer faces the flame (they shield each other): at most
                 // half the area of the cell's six faces (PROTOTYPE, tuned to NIST dry-tree peak HRR)
-                float areaB = bf * (blocked[c] ? perArea : std::min(perArea, 3.0f * A));
+                // thermoplastics melt and slump as they burn (fibre fill, foam): the
+                // flaming surface is a fraction of the item's outline (melt_burn_area)
+                float areaB = bf * m.meltBurnArea * (blocked[c] ? perArea : std::min(perArea, 3.0f * A));
                 // a burning patch carries its own flame, whatever the 20 cm cell average
                 // says: full flame heat flux at the pyrolysis temperature (MODELED, as
                 // surfaceHeating: 1200 K, emissivity 0.3, h 15)
@@ -615,6 +617,10 @@ void Solver::solidsStep(float dt) {
         float radIn = radQ[c];
         Qs -= bf * radIn;
         Pburn += bf * radIn / dt;
+        // conduction from touching solid cells splits the same way (it was
+        // all landing on the shrinking unburned part and boiling its slab)
+        Qs -= bf * condQ[c];
+        Pburn += bf * condQ[c] / dt;
         float slabDm = 0;
         if (blocked[c] && ng > 0) {
             // thermally thick solid: everything the surface absorbs (the burning
@@ -810,9 +816,14 @@ void Solver::barriersStep(float dt) {
             const Material& m = lib->materials[as.layers[li].material];
             bool gone = false;
             if (m.combustible) {
-                if (b.T[s] > m.pyrolysisTemp && b.mass[li] > 0) {
+                // thin linings (paint) need a sustained heat flux to burn: below the
+                // material's critical flux the film only bakes (cone-calorimeter behavior)
+                float qSide = ((s == 0 ? flux[0] : flux[1]) * A * dt + b.radIn[s]) / (A * dt);
+                if (b.T[s] > m.pyrolysisTemp && b.mass[li] > 0 && qSide >= m.criticalFlux) {
                     float E = C[s] * (b.T[s] - m.pyrolysisTemp);
-                    float dm = std::min(b.mass[li], E / m.heatOfGasification);  // kg/m2
+                    // gasify at most what this step's incoming flux supports (no flash of
+                    // heat stored while the film was baking)
+                    float dm = std::min({b.mass[li], E / m.heatOfGasification, std::max(0.0f, qSide) * dt / m.heatOfGasification});  // kg/m2
                     b.mass[li] -= dm;
                     b.T[s] -= dm * m.heatOfGasification / C[s];
                     if (L[0] == L[1]) b.T[1] = b.T[0];
@@ -823,6 +834,7 @@ void Solver::barriersStep(float dt) {
                         float gen = dmA * (1.0f - m.aerosolYield) * m.heatOfCombustion / DHC_FUEL;
                         addGasSpecies(gc, gen, dmA * m.aerosolYield, dmA * m.sootYield, matAIT[as.layers[li].material]);
                         stats.pyrolysis += dmA / dt;
+                        stats.liningHeat += (double)gen * DHC_FUEL;
                     }
                 }
                 gone = b.mass[li] <= 1e-5f;

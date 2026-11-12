@@ -19,14 +19,14 @@ truss_spacing 2
 stud_spacing 1.333
 attic_vent_ratio 150
 
-assembly_ext_wall ext_wall_2x4
-assembly_ceiling ceiling_r38
-assembly_roof roof_osb_shingle
-assembly_soffit soffit_vinyl_vented
-assembly_gable gable_wall
-assembly_fascia fascia_wood
-stud_material lumber_spf
-truss_material lumber_spf
+assembly_ext_wall lab_wall
+assembly_ceiling lab_ceiling
+assembly_roof lab_ceiling
+assembly_soffit lab_wall
+assembly_gable lab_wall
+assembly_fascia lab_wall
+stud_material steel
+truss_material steel
 gusset_material steel
 
 story 1
