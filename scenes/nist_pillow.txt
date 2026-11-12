@@ -1,0 +1,36 @@
+photon_scene 1
+# NIST "Room Flashover Experiments to Demonstrate the Effectiveness of Barrier
+# Fabrics" (NIST Fire Calorimetry Database): an upholstered sofa in a furnished
+# 3.7 m x 3.7 m x 2.4 m room, ignited by a small propane flame at a polyester
+# pillow. Measured (no barrier fabric, tests 1/3/5/10): 100 kW at 83-124 s,
+# 1 MW at 264-377 s, peak 8.1-9.6 MW at 339-457 s with flashover.
+# Furnishing layout and doorway size here are approximations of the test room
+# (verify against the test report); feet, scene convention.
+
+name "NIST throw pillow alone (barrier-fabric study pillow tests)"
+units ft
+
+footprint 12.14 12.14
+stories 1
+ceiling_height 7.87
+roof_pitch 6 12
+eave_overhang 1.0
+truss_spacing 2
+stud_spacing 1.333
+attic_vent_ratio 150
+
+assembly_ext_wall ext_wall_2x4
+assembly_ceiling ceiling_r38
+assembly_roof roof_osb_shingle
+assembly_soffit soffit_vinyl_vented
+assembly_gable gable_wall
+assembly_fascia fascia_wood
+stud_material lumber_spf
+truss_material lumber_spf
+gusset_material steel
+
+story 1
+room "Test room"  0 0 12.14 12.14   paint 0.80 0.78 0.72
+door ext_door_solid "Doorway"  4.6 0 7.6 0  open
+
+place throw_pillow  "Pillow left"     6.0  6.0

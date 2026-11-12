@@ -1,0 +1,11 @@
+photon_case 1
+# Single item vs NIST: 45 cm polyester throw pillow, 30 s propane flame at its
+# lower side (NIST FCD throwpillow1/2): ~5 kW at 60 s, 30-41 kW peak at 120-150 s,
+# out by ~300 s.
+title "Photon vs NIST throw pillow"
+scene scenes/nist_pillow.txt
+profile realtime
+duration 360
+output out/nist_pillow
+ignite "Pillow left" 0.5 30 side
+stop_when_out

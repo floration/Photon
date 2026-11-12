@@ -51,7 +51,7 @@ int runCase(int argc, char** argv) {
     Wind wind;
     std::vector<std::string> opens;
     std::vector<Burner> burners;
-    struct Ign { std::string item; float kw, dur; };
+    struct Ign { std::string item; float kw, dur; std::string where; };   // where: top (flame on top) or side (at the lower side)
     std::vector<Ign> ignites;
     std::vector<Device> devs;
     bool ok = true;
@@ -82,7 +82,7 @@ int runCase(int argc, char** argv) {
             b.rampS = num(t[8]);
             burners.push_back(b);
         } else if (k == "ignite" && t.size() > 3) {   // ignite "<item>" kW seconds: small flame on an item
-            ignites.push_back({t[1], num(t[2]), num(t[3])});
+            ignites.push_back({t[1], num(t[2]), num(t[3]), t.size() > 4 ? t[4] : std::string("top")});
         } else if (k == "device" && t.size() > 5) {
             static const std::pair<const char*, DeviceKind> kinds[] = {
                 {"temp", DeviceKind::Temperature}, {"u", DeviceKind::VelU}, {"v", DeviceKind::VelV}, {"w", DeviceKind::VelW},
@@ -160,6 +160,14 @@ int runCase(int argc, char** argv) {
             if (sim.addBurner(b) < 0) { std::fprintf(stderr, "burner '%s' covers no gas cell\n", b.label.c_str()); return 1; }
         for (const Ign& g : ignites) {
             int cell = -1;
+            if (g.where == "side")   // lowest item cell with open air beside it
+                for (int c = 0; c < sim.N && cell < 0; ++c) {
+                    if (sim.itemOf[c] < 0 || scene.items[sim.itemOf[c]].name != g.item || !sim.blocked[c]) continue;
+                    int i, j, k;
+                    sim.cellIJK(c, i, j, k);
+                    const int nb[4] = {i > 0 ? c - 1 : -1, i < sim.nx - 1 ? c + 1 : -1, j > 0 ? c - sim.nx : -1, j < sim.ny - 1 ? c + sim.nx : -1};
+                    for (int q = 0; q < 4 && cell < 0; ++q) if (nb[q] >= 0 && !sim.blocked[nb[q]]) cell = nb[q];
+                }
             for (int c = 0; c < sim.N && cell < 0; ++c)   // porous fuel of the item first (needles)
                 if (sim.itemOf[c] >= 0 && scene.items[sim.itemOf[c]].name == g.item && !sim.blocked[c] && sim.fuelMass[c] > 0) cell = c;
             for (int c = 0; c < sim.N && cell < 0; ++c) {
@@ -190,7 +198,23 @@ int runCase(int argc, char** argv) {
         dc << "\n";
         hc << "Time,HRR_kW,MaxGas_C,MaxVel,PressureIters,PressureResidual,Zones,LeakFaces\n";
     }
+    // per-item heat release from its pyrolysis (kW, fuel energy given off), the
+    // quantity a furniture calorimeter measures for that item
+    std::ofstream ic(prefix + "_items.csv", resume.empty() ? std::ios::trunc : std::ios::app);
+    if (resume.empty()) {
+        ic << "Time";
+        for (const Item& it : scene.items) ic << "," << it.name;
+        ic << "\n";
+    }
+    std::vector<double> lastHeat(sim.itemHeat);
+    float lastT = sim.time;
     auto row = [&] {
+        float dtr = std::max(1e-6f, sim.time - lastT);
+        ic << sim.time;
+        for (size_t q = 0; q < sim.itemHeat.size(); ++q) ic << "," << (sim.itemHeat[q] - lastHeat[q]) / dtr / 1000.0;
+        ic << "\n";
+        lastHeat = sim.itemHeat;
+        lastT = sim.time;
         dc << sim.time;
         for (const Device& d : devs) dc << "," << sampleDevice(sim, d);
         dc << "\n";

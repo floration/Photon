@@ -264,6 +264,8 @@ public:
     std::vector<int> solidCells;
     std::vector<float> itemMass0, itemPyro;   // per item: initial mass, off-gassed mass
     std::vector<uint8_t> itemFlags;
+    std::vector<double> itemHeat;        // J of fuel-gas energy each item has given off (burned or not)
+    std::vector<float> itemAreaScale;    // real surface area / grid-exposed area of each item (thin items look fat on a 20 cm grid)
     std::vector<Barrier> barriers;
     std::vector<Ignition> ignitions;
     std::vector<SimEvent> events;
@@ -339,6 +341,7 @@ private:
     void addGasSpecies(int c, float fuelGen, float aerosol, float sootPot, float ait = T_AUTO);
     float cellSpeed(int c) const;
     float surfaceHeating(int g, float Tg, float Ts, float h, float area) const;
+    float localHRR(int c) const;
     void unblockCell(int c);
 };
 

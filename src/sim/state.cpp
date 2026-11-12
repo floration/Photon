@@ -80,7 +80,7 @@ bool Solver::saveState(const std::string& path, std::string& err) const {
     o.vec(blocked); o.vec(porous); o.vec(fuelMat); o.vec(itemOf);
     o.vec(fuelMass); o.vec(fuelMass0); o.vec(charMass); o.vec(fuelT); o.vec(fuelArea);
     o.vec(solidCells); o.vec(burnFrac); o.vec(ignE); o.vec(slab); o.vec(slabF); o.vec(coverMat); o.vec(coverLeft);
-    o.vec(itemMass0); o.vec(itemPyro); o.vec(itemFlags);
+    o.vec(itemMass0); o.vec(itemPyro); o.vec(itemFlags); o.vec(itemAreaScale); o.vec(itemHeat);
     o.pod(maxVel); o.pod(maxNu);
     uint64_t nb = barriers.size();
     o.pod(nb);
@@ -152,7 +152,7 @@ bool Solver::loadState(const std::string& path, std::string& err) {
     in.vec(blocked, N); in.vec(porous, N); in.vec(fuelMat, N); in.vec(itemOf, N);
     in.vec(fuelMass, N); in.vec(fuelMass0, N); in.vec(charMass, N); in.vec(fuelT, N); in.vec(fuelArea, N);
     in.vec(solidCells); in.vec(burnFrac, N); in.vec(ignE, N); in.vec(slab, (size_t)N * SLAB_NODES); in.vec(slabF, (size_t)N * SLAB_NODES); in.vec(coverMat, N); in.vec(coverLeft, N);
-    in.vec(itemMass0); in.vec(itemPyro); in.vec(itemFlags);
+    in.vec(itemMass0); in.vec(itemPyro); in.vec(itemFlags); in.vec(itemAreaScale); in.vec(itemHeat);
     in.pod(maxVel); in.pod(maxNu);
     uint64_t nb = 0;
     in.pod(nb);

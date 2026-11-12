@@ -433,13 +433,47 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             itemMass0[it] += pt.mass;
         }
     }
+    // Each item's real surface area against the area its grid cells expose:
+    // a 15 cm pillow fills whole 20 cm cells and would otherwise burn on
+    // several times its true surface.
+    itemAreaScale.assign(sc.items.size(), 1.0f);
+    itemHeat.assign(sc.items.size(), 0.0);
+    {
+        std::vector<double> trueA(sc.items.size(), 0.0), gridA(sc.items.size(), 0.0);
+        for (size_t it = 0; it < sc.items.size(); ++it)
+            for (const Part& pt : sc.items[it].parts) {
+                bool inside = false;   // a part inside another (pillow fill in its cover) has no surface of its own
+                for (const Part& o : sc.items[it].parts)
+                    if (&o != &pt && o.box.x0 <= pt.box.x0 && o.box.y0 <= pt.box.y0 && o.box.z0 <= pt.box.z0 &&
+                        o.box.x1 >= pt.box.x1 && o.box.y1 >= pt.box.y1 && o.box.z1 >= pt.box.z1) inside = true;
+                if (inside) continue;
+                double a = pt.box.x1 - pt.box.x0, b = pt.box.y1 - pt.box.y0, h = pt.box.z1 - pt.box.z0;
+                trueA[it] += 2 * (a * b + a * h + b * h);
+            }
+        const int off6[6] = {-1, 1, -nx, nx, -nx * ny, nx * ny};
+        for (int k = 0; k < nz; ++k)
+            for (int j = 0; j < ny; ++j)
+                for (int i = 0; i < nx; ++i) {
+                    int c = cell(i, j, k);
+                    int it = itemOf[c];
+                    if (it < 0 || !blocked[c]) continue;
+                    for (int d = 0; d < 6; ++d) {
+                        if ((d == 0 && i == 0) || (d == 1 && i == nx - 1) || (d == 2 && j == 0) || (d == 3 && j == ny - 1) ||
+                            (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
+                        int n = c + off6[d];
+                        if (!blocked[n]) gridA[it] += dx * dx;
+                    }
+                }
+        for (size_t it = 0; it < sc.items.size(); ++it)
+            if (gridA[it] > 0) itemAreaScale[it] = (float)std::clamp(trueA[it] / gridA[it], 0.1, 1.0);
+    }
     // Upholstered items: foam is never bare; its surfaces wear the item's
     // fabric (about 0.8 mm, typical upholstery fabric thickness, calibrated to the NIST sofa room, verify).
     for (int c = 0; c < N; ++c) {
         int it = itemOf[c];
-        if (it < 0 || !blocked[c] || fuelMat[c] < 0 || lb.materials[fuelMat[c]].id != "pu_foam") continue;
+        if (it < 0 || !blocked[c] || fuelMat[c] < 0 || (lb.materials[fuelMat[c]].id != "pu_foam" && lb.materials[fuelMat[c]].id != "polyester_fill")) continue;
         for (const Part& pt : sc.items[it].parts)
-            if (lb.materials[pt.material].id == "fabric") { coverMat[c] = (int16_t)pt.material; coverLeft[c] = 0.0008f; break; }
+            if (lb.materials[pt.material].id == "fabric" || lb.materials[pt.material].id == "polyester_fabric") { coverMat[c] = (int16_t)pt.material; coverLeft[c] = 0.0008f; break; }
     }
     for (int c = 0; c < N; ++c)
         if (fuelMat[c] >= 0) solidCells.push_back(c);

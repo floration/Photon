@@ -346,13 +346,13 @@ void Solver::combustion(float dt) {
 // Gas-to-surface heating. Where the adjacent cell is flaming, a 20 cm cell's
 // mean temperature is far below the flame's, so the flame-covered part of the
 // surface gets the flux of a turbulent flame instead (sub-grid flame heat
-// feedback, MODELED: flame 1200 K, emissivity 0.3, h 15 W/m2K, about
+// feedback, MODELED: flame 1300 K, emissivity 0.3, h 20 W/m2K, about
 // 30-50 kW/m2 to a fuel at its pyrolysis temperature; typical measured
 // burning-surface fluxes of furniture, SFPE Handbook ch. on flame spread,
 // verify). Flame coverage grows with the cell's heat release rate and is full
 // at 1.2 MW/m3. The gas cell pays for the energy.
 float Solver::surfaceHeating(int g, float Tg, float Ts, float h, float area) const {
-    constexpr float T_FLAME = 1200.0f, EPS_FLAME = 0.3f, H_FLAME = 15.0f, HRRPUV_FULL = 1.2e6f;
+    constexpr float T_FLAME = 1300.0f, EPS_FLAME = 0.3f, H_FLAME = 20.0f, HRRPUV_FULL = 1.2e6f;
     constexpr float FEEDBACK_MAX = 0.3f;   // a flame gives at most this share of its heat back to the fuel beside it
     float conv = h * (Tg - Ts);
     float phi = pilot[g] ? 1.0f : std::min(1.0f, hrr[g] / HRRPUV_FULL);
@@ -441,6 +441,22 @@ float Solver::pyrolyzeSlab(int c, const Material& m, float area, float dt) {
     return (float)dm;
 }
 
+// Heat release (W) of the flames in the 5x5x5 cells around c: the fire this
+// surface sits in, for flame size.
+float Solver::localHRR(int c) const {
+    int i, j, k;
+    cellIJK(c, i, j, k);
+    double q = 0;
+    for (int dk = -2; dk <= 2; ++dk)
+        for (int dj = -2; dj <= 2; ++dj)
+            for (int di = -2; di <= 2; ++di) {
+                int a = i + di, b = j + dj, e = k + dk;
+                if (a < 0 || b < 0 || e < 0 || a >= nx || b >= ny || e >= nz) continue;
+                q += hrr[cell(a, b, e)];
+            }
+    return (float)(q * dx * dx * dx);
+}
+
 void Solver::unblockCell(int c) {
     blocked[c] = 0;
     porous[c] = 1;
@@ -507,7 +523,7 @@ void Solver::solidsStep(float dt) {
             gas[ng++] = c;
         }
         float area;
-        if (blocked[c]) area = ng * A;
+        if (blocked[c]) area = ng * A * (itemOf[c] >= 0 ? itemAreaScale[itemOf[c]] : 1.0f);
         else area = fuelMass0[c] > 0 ? fuelArea[c] * std::cbrt(sq(std::max(0.0f, total / fuelMass0[c]))) : 0;
         float heatMass = std::max(1e-3f, std::min(total, m.density * std::max(area, 0.25f * A) * m.surfaceDepth));
         float C = heatMass * m.specificHeat;
@@ -524,6 +540,8 @@ void Solver::solidsStep(float dt) {
         const float Tp = m.pyrolysisTemp;
         const float bf = m.combustible ? burnFrac[c] : 0.0f;
         float yoAvg = 0, Pburn = 0, flameTouch = 0;
+        int qLocalCell = -1;
+        float qLocal = 0;
         for (int q = 0; q < ng; ++q) {
             int g = gas[q];
             float Tg = T[g];
@@ -551,7 +569,14 @@ void Solver::solidsStep(float dt) {
                 // a burning patch carries its own flame, whatever the 20 cm cell average
                 // says: full flame heat flux at the pyrolysis temperature (MODELED, as
                 // surfaceHeating: 1200 K, emissivity 0.3, h 15)
-                float hb = std::max(h * (Tg - Tp), 15.0f * (1200.0f - Tp) + 0.3f * SIGMA * (p4(1200.0f) - p4(Tp)));
+                // the flame over a burning patch: convection plus radiation whose
+                // emissivity grows with flame size (1 - exp(-kappa_f L_f), kappa_f 0.8 1/m,
+                // flame thickness 0.3 x Heskestad height from the HRR around it). Small
+                // flames give ~15 kW/m2, metre-high flames ~35, room fires ~70 (MODELED)
+                if (qLocalCell != c) { qLocalCell = c; qLocal = localHRR(c); }
+                float Lf = 0.235f * std::pow(std::max(qLocal, 100.0f) / 1000.0f, 0.4f);
+                float epsF = 1.0f - std::exp(-0.8f * 0.3f * Lf);
+                float hb = std::max(h * (Tg - Tp), 20.0f * (1300.0f - Tp) + epsF * SIGMA * (p4(1300.0f) - p4(Tp)));
                 float emitB = radiationOn ? m.emissivity * SIGMA * (p4(Tp) - p4(T0)) : 0.0f;
                 Pburn += areaB * (hb - emitB);
                 // the flame over a burning surface is fed by that surface: the gas
@@ -570,7 +595,7 @@ void Solver::solidsStep(float dt) {
                     (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
                 int n = c + off[d];
                 if (!blocked[n] || fuelMat[n] < 0 || burnFrac[n] <= 0 || fuelMass[n] <= 0) continue;
-                float fl = 15.0f * (1200.0f - Ts) + 0.3f * SIGMA * (p4(1200.0f) - p4(Ts));
+                float fl = 20.0f * (1300.0f - Ts) + 0.3f * SIGMA * (p4(1300.0f) - p4(Ts));
                 flameTouch = std::max(flameTouch, 0.5f * burnFrac[n] * fl);
             }
         }
@@ -655,6 +680,7 @@ void Solver::solidsStep(float dt) {
             int it = itemOf[c];
             if (it >= 0) {
                 itemPyro[it] += dm;
+                itemHeat[it] += (double)gen * DHC_FUEL;
                 const std::string& nm = scene->items[it].name;
                 if (!(itemFlags[it] & 1) && itemPyro[it] > 0.05f) {
                     itemFlags[it] |= 1;
