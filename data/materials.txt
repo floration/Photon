@@ -481,3 +481,31 @@ material ceramic
   color 0.95 0.95 0.95
   source "Typical whiteware ceramic properties (verify against SFPE Handbook appendix)"
 end
+
+material dry_conifer
+  name "Dry conifer foliage: needles and fine twigs (cut Christmas tree, dried)"
+  density 550
+  conductivity 0.12
+  specific_heat 1500
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 560
+  heat_of_gasification 1.8e6
+  heat_of_combustion 18.0e6
+  soot_yield 0.015
+  aerosol_yield 0.03
+  char_yield 0.20
+  surface_depth 0.0005
+  porous_area 9.0
+  color 0.20 0.38 0.18
+  source "PROTOTYPE: needle surface-to-volume ~5000 1/m over density 550 kg/m3 gives ~9 m2/kg; dHc and Lg from wood values, Tewarson SFPE Handbook (verify)"
+  source "Targets: dry tree peak 7.4 MW at 31 s, total 938 MJ (NIST TN 2131, 2020); dry Scotch pine room flashover within 40 s (NIST/USFA dry tree video)"
+  offgas TAR 0.40
+  offgas H2O 0.15
+  offgas CO2 0.15
+  offgas CO 0.08
+  offgas CH4 0.06
+  offgas CH2O 0.06
+  offgas C2H4O2 0.05
+  offgas C6H6 0.05
+end

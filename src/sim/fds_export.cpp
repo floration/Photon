@@ -41,7 +41,7 @@ bool exportFds(const Solver& s, const std::string& path, const std::string& chid
     if (s.wind.speed > 0)
         f << "&WIND SPEED=" << s.wind.speed << ", DIRECTION=" << s.wind.fromDeg << ", PLE=" << s.wind.exponent << " /\n";
     f << "&REAC FUEL='PHOTON_FUEL', C=1, H=1.7, O=0.4, SOOT_YIELD=0.01, CO_YIELD=" << Solver::CO_YIELD
-      << ", HEAT_OF_COMBUSTION=" << Solver::DHC_FUEL / 1000.0f << " /\n";
+      << ", HEAT_OF_COMBUSTION=" << Solver::DHC_FUEL / 1000.0f << (s.radiationOn ? "" : ", RADIATIVE_FRACTION=0.0") << " /\n";
     if (s.adiabaticSurfaces) f << "&SURF ID='WALL', ADIABATIC=.TRUE., DEFAULT=.TRUE., COLOR='GRAY' /\n";
     else f << "&SURF ID='WALL', DEFAULT=.TRUE., COLOR='GRAY' /   INERT (fixed 20 C); Photon surface heat transfer is prototype until Phase 4\n";
     // burners

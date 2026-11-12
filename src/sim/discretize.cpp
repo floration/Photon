@@ -387,6 +387,22 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             if (cells.empty()) continue;
             float share = pt.mass / cells.size();
             const Material& m = lb.materials[pt.material];
+            if (m.porousArea > 0) {   // fuel spread through open air (tree needles)
+                for (int c : cells) {
+                    if (blocked[c]) continue;
+                    if (fuelMat[c] != pt.material) {
+                        fuelMass0[c] = fuelMass[c] = charMass[c] = fuelArea[c] = 0;
+                        fuelMat[c] = (int16_t)pt.material;
+                    }
+                    porous[c] = 1;
+                    itemOf[c] = (int16_t)it;
+                    fuelMass0[c] += share;
+                    fuelMass[c] += share * (m.combustible ? 1 - m.charYield : 1);
+                    fuelArea[c] += share * m.porousArea;
+                }
+                itemMass0[it] += pt.mass;
+                continue;
+            }
             for (int c : cells) {
                 bool fresh = !blocked[c];
                 if (fresh) {  // replaces any floor covering in this cell

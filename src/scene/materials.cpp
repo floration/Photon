@@ -133,6 +133,7 @@ bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
         else if (k == "aerosol_yield") dst = &cur->aerosolYield;
         else if (k == "char_yield") dst = &cur->charYield;
         else if (k == "surface_depth") dst = &cur->surfaceDepth;
+        else if (k == "porous_area") dst = &cur->porousArea;
         else if (k == "fail_temp") dst = &cur->failTemp;
         else if (k == "fail_time") dst = &cur->failTime;
         else if (k == "design_fb") dst = &cur->designFb;

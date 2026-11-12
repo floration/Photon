@@ -114,6 +114,8 @@ def main():
     lines = [f"{args.labels[0]}: {args.a}", f"{args.labels[1]}: {args.b}", f"time window {t0:g} to {t1:g} s (means)", ""]
     lines.append(f"{'device':18s} {args.labels[0]:>12s} {args.labels[1]:>12s} {'diff':>10s} {'rel':>8s}")
     rels = []
+    # scale for temperature differences: the largest rise above ambient in B
+    rise = max([abs(window_mean(B["Time"], B[k], t0, t1) - 20.0) for k in B if k.startswith("TC")] or [1.0])
     for k in A:
         if k == "Time" or k not in B:
             continue
@@ -121,9 +123,10 @@ def main():
         b = window_mean(B["Time"], B[k], t0, t1)
         d = a - b
         # relative to the rise above ambient for temperatures, to the reference otherwise
-        base = abs(b - 20.0) if ("TC" in k or k.endswith("_upper") or k.startswith("T_")) else abs(b)
+        is_t = "TC" in k or k.endswith("_upper") or k.startswith("T_")
+        base = max(abs(b - 20.0), 0.25 * rise) if is_t else abs(b)
         rel = abs(d) / base if base > 1e-6 else float("nan")
-        if not math.isnan(rel) and base > (5.0 if "TC" in k else 0.05):
+        if not math.isnan(rel) and (is_t or base > 0.05):
             rels.append((rel, k))
         lines.append(f"{k:18s} {a:12.3f} {b:12.3f} {d:10.3f} {rel * 100 if not math.isnan(rel) else float('nan'):7.1f}%")
     if rels:

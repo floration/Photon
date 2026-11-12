@@ -1,0 +1,248 @@
+photon_scene 1
+# Phase 1-2 model home, rebuilt from scratch: a 1.5-story Cape Cod.
+# 40 x 28 ft footprint, slab on grade, 8 ft first-floor ceilings, 2x10 floor
+# joists, 12/12 stick-framed roof (2x8 rafters at 16 in o.c., ridge board,
+# collar ties), second floor under the roof with 5 ft knee walls, sloped
+# ceilings and a flat ceiling at the collar ties. Knee-wall attics behind the
+# knee walls and a small upper attic above the collar ties are real concealed
+# spaces in the fire simulation.
+#
+# Coordinates: feet, origin at the south-west exterior corner at slab level,
+# x east (40 ft side), y north (28 ft side). Heights are above the floor of the
+# story the line belongs to. Front of the house faces south (y = 0).
+# Furniture and appliances are placed from data/assets.txt:
+#   place <asset> "<name>" x y [rot 0|90|180|270] [z <ft>]
+#   rot 0 = back toward north, 90 = back toward west, 180 = south, 270 = east
+
+name "Model home with a dry Christmas tree in the living room (NIST tree comparison)"
+units ft
+
+footprint 40 28
+stories 2
+ceiling_height 8
+floor_depth 0.833            # 2x10 (9-1/4 in) + 23/32 in subfloor
+joist_spacing 1.333
+joist_depth 0.771
+roof_type half_story
+roof_pitch 12 12
+roof_plate_height 2          # rafters bear 2 ft above the second floor
+knee_wall_inset 3            # knee walls 3 ft in from the eave walls -> 5 ft tall
+collar_height 7.5            # flat ceiling at the collar ties
+rafter_spacing 1.333         # 16 in o.c.
+eave_overhang 1.0
+stud_spacing 1.333
+truss_spacing 2              # unused with a half story
+attic_vent_ratio 150
+
+assembly_ext_wall ext_wall_2x4
+assembly_ceiling ceiling_r38
+assembly_floor_ceiling floor_ceiling_gyp
+assembly_subfloor subfloor_osb
+assembly_knee_wall knee_wall_2x4
+assembly_sloped_ceiling roof_sloped_ceiling
+assembly_roof roof_osb_shingle
+assembly_soffit soffit_vinyl_vented
+assembly_gable gable_wall
+assembly_fascia fascia_wood
+stud_material lumber_spf
+joist_material lumber_spf
+truss_material lumber_spf
+gusset_material steel
+
+# =============================================================================
+story 1
+# =============================================================================
+#    name           x0  y0  x1  y1   floor covering          paint color
+room "Living"        0   0  16  16   floor nylon_carpet 2.4  paint 0.80 0.74 0.62
+room "Bedroom 1"     0  16  16  28   floor nylon_carpet 2.4  paint 0.64 0.72 0.80
+room "Front hall"   16   0  20  28   floor pvc_vinyl 2.8     paint 0.86 0.84 0.78
+room "Dining"       20   0  31  13   floor nylon_carpet 2.4  paint 0.70 0.76 0.66
+room "Bath 1"       31   0  40   8   floor pvc_vinyl 2.8     paint 0.66 0.78 0.84
+room "Laundry"      31   8  40  13   floor pvc_vinyl 2.8     paint 0.90 0.90 0.88
+room "Kitchen"      20  13  40  28   floor pvc_vinyl 2.8     paint 0.90 0.86 0.64
+
+wall int_wall_2x4  16  0  16 28      # living, bedroom 1 | hall
+wall int_wall_2x4   0 16  16 16      # living | bedroom 1
+wall int_wall_2x4  20  0  20 28      # hall | dining, kitchen
+wall int_wall_2x4  20 13  40 13      # dining, bath, laundry | kitchen
+wall int_wall_2x4  31  0  31 13      # dining | bath, laundry
+wall int_wall_2x4  31  8  40  8      # bath | laundry
+
+cased "Living-hall opening"               16  4  16 12   head 7
+door int_door_hollow "Bedroom 1 door"     16 20  16 22.667  open
+cased "Dining-hall opening"               20  2  20 11   head 7
+cased "Kitchen-hall opening"              20 17  20 23   head 7
+cased "Dining-kitchen opening"            22 13  29 13   head 7
+door int_door_hollow "Laundry door"       33.5 13  36.167 13  open
+door int_door_hollow "Bath 1 door"        32  8  34.667 8   closed
+door ext_door_solid  "Front door"         16.5 0  19.5 0  closed
+door ext_door_solid  "Back door"          40 16  40 19  closed
+
+window window_double "Living south window"     4  0   9  0  sill 3   head 6.667
+window window_double "Living west window"      0  6   0 10  sill 3   head 6.667
+window window_double "Bedroom 1 west window"   0 20   0 24  sill 3   head 6.667
+window window_double "Bedroom 1 north window"  6 28  10 28  sill 3   head 6.667
+window window_double "Dining south window"    23  0  28  0  sill 3   head 6.667
+window window_double "Bath 1 window"          35  0  37  0  sill 4.5 head 6.667
+window window_double "Kitchen north window"   28 28  32 28  sill 3.5 head 6.667
+window window_double "Kitchen east window"    40 22  40 26  sill 3.5 head 6.667
+
+stair 16.3 3  19.7 14  +y                   # center stair, rises north to mid-house under the ridge
+
+fixture panel        "Main electrical panel"   39.7 11.5
+fixture water_heater "Water heater"            38.6  9.3
+fixture washer       "Washer box"              32.5 12.6
+fixture kitchen_sink "Kitchen sink"            30.0 27.6
+fixture range        "Range"                   24.7 27.6
+fixture sink         "Bath 1 sink"             33.0  0.4
+fixture toilet       "Bath 1 toilet"           35.6  0.4
+fixture tub          "Bath 1 tub"              39.6  4.4
+
+# ---- contents, first floor --------------------------------------------------
+place sofa_3seat      "Sofa"                  1.9   8.0  rot 90
+place end_table       "End table"             1.4   2.6
+place coffee_table    "Coffee table"          5.2   8.0  rot 90
+place armchair        "Armchair"             13.4   6.0  rot 270
+place tv_stand        "TV stand"              8.0  14.85
+place tv_55           "Television"            8.0  15.2  z 2
+place bookshelf       "Bookshelf"            13.0  15.1
+place floor_lamp      "Floor lamp"            1.2  13.6
+place storage_bin_stack "Living room storage bins" 14.6 1.1
+place christmas_tree_dry "Christmas tree" 12.0 11.0
+item "Living room curtains"
+  part fabric 1.2   3.5 0.2 2.6   4.5 0.5 7.4     # open, gathered to the side
+  part fabric 1.2   8.5 0.2 2.6   9.5 0.5 7.4
+  part fabric 1   0.2 5.5 2.6   0.5 6.5 7.4     # open, gathered to the side
+  part fabric 1   0.2 9.5 2.6   0.5 10.5 7.4
+end
+
+place bed_queen       "Bedroom 1 bed"         8.0  24.27
+place nightstand      "Bedroom 1 nightstand W" 4.1  26.8
+place nightstand      "Bedroom 1 nightstand E" 11.9 26.8
+place dresser         "Bedroom 1 dresser"     8.0  17.15 rot 180
+place closet_clothing "Bedroom 1 closet clothing" 1.4 21.5 rot 90
+place wastebasket     "Bedroom 1 wastebasket" 14.8 17.0
+item "Bedroom 1 curtains"
+  part fabric 0.9   0.2 19.5 2.6   0.5 20.5 7.4     # open, gathered to the side
+  part fabric 0.9   0.2 23.5 2.6   0.5 24.5 7.4
+  part fabric 0.9   5.5 27.5 2.6   6.5 27.8 7.4     # open, gathered to the side
+  part fabric 0.9   9.5 27.5 2.6   10.5 27.8 7.4
+end
+
+place dining_table_6  "Dining table"         25.5  6.5
+place dining_chair    "Dining chair S1"      24.0  3.9  rot 180
+place dining_chair    "Dining chair S2"      27.0  3.9  rot 180
+place dining_chair    "Dining chair N1"      24.0  9.1
+place dining_chair    "Dining chair N2"      27.0  9.1
+place dining_chair    "Dining chair W"       21.6  6.5  rot 90
+place dining_chair    "Dining chair E"       29.4  6.5  rot 270
+item "Dining curtains"
+  part fabric 1   22.5 0.2 2.6   23.5 0.5 7.4     # open, gathered to the side
+  part fabric 1   27.5 0.2 2.6   28.5 0.5 7.4
+end
+
+place base_cabinet_36 "Kitchen cabinet 1"    21.9  26.6
+place range_30        "Range"                24.7  26.5
+place base_cabinet_36 "Kitchen cabinet 2"    27.5  26.6
+place base_cabinet_36 "Sink cabinet"         30.5  26.6
+place dishwasher      "Dishwasher"           33.0  26.6
+place base_cabinet_36 "Kitchen cabinet 3"    35.5  26.6
+place refrigerator    "Refrigerator"         38.4  26.4
+place upper_cabinet_30 "Upper cabinet 1"     21.65 27.1  z 4.5
+place microwave_otr   "Microwave"            24.7  27.2  z 4.6
+place upper_cabinet_30 "Upper cabinet 2"     35.25 27.1  z 4.5
+place kitchen_table   "Kitchen table"        27.0  19.0
+place dining_chair    "Kitchen chair S"      27.0  17.4  rot 180
+place dining_chair    "Kitchen chair N"      27.0  20.6
+place dining_chair    "Kitchen chair W"      24.6  19.0  rot 90
+place dining_chair    "Kitchen chair E"      29.4  19.0  rot 270
+place kitchen_trash   "Kitchen trash can"    37.6  23.0
+place recycling_bin   "Kitchen recycling"    37.6  21.6
+item "Kitchen curtains"
+  part fabric 0.6   39.4 21.5 3.2   39.7 22.5 7.2     # open, gathered to the side
+  part fabric 0.6   39.4 25.5 3.2   39.7 26.5 7.2
+end
+
+place vanity_36       "Bath 1 vanity"        33.0  1.27  rot 180
+place toilet          "Bath 1 toilet"        35.6  1.6   rot 180
+place bathtub_60      "Bath 1 tub"           38.35 4.4   rot 270
+place wastebasket     "Bath 1 wastebasket"   31.6  7.2
+
+place washer          "Washer"               32.5  11.9
+place dryer           "Dryer"                34.8  11.9
+
+# =============================================================================
+story 2
+# =============================================================================
+# Rooms sit between the knee walls (y 3 to 25). Behind the knee walls are the
+# knee-wall attics; above the 7.5 ft flat ceiling is the upper attic.
+room "Bedroom 2"      0   3  16  25   floor nylon_carpet 2.4  paint 0.72 0.66 0.80
+room "Upper hall"    16   3  20  25   floor nylon_carpet 2.4  paint 0.84 0.82 0.76
+room "Bedroom 3"     20   3  40  14   floor nylon_carpet 2.4  paint 0.68 0.80 0.70
+room "Upper landing" 20  14  26  20   floor nylon_carpet 2.4  paint 0.84 0.82 0.76
+room "Bath 2"        20  20  26  25   floor pvc_vinyl 2.8     paint 0.90 0.90 0.92
+room "Bedroom 4"     26  14  40  25   floor nylon_carpet 2.4  paint 0.82 0.72 0.62
+
+wall int_wall_2x4  16  3  16 25      # bedroom 2 | hall
+wall int_wall_2x4  20  3  20 14      # hall | bedroom 3
+wall int_wall_2x4  20 20  20 25      # hall | bath 2
+wall int_wall_2x4  20 14  40 14      # bedroom 3 | landing, bedroom 4
+wall int_wall_2x4  20 20  26 20      # landing | bath 2
+wall int_wall_2x4  26 14  26 25      # landing, bath 2 | bedroom 4
+
+door int_door_hollow "Bedroom 2 door"     16 15  16 17.667  open
+door int_door_hollow "Bedroom 3 door"     21 14  23.667 14  closed
+door int_door_hollow "Bath 2 door"        21 20  23.667 20  open
+door int_door_hollow "Bedroom 4 door"     26 15  26 17.667  open
+
+window window_double "Bedroom 2 gable window S" 0  8   0 12  sill 3 head 6.667
+window window_double "Bedroom 2 gable window N" 0 16   0 20  sill 3 head 6.667
+window window_double "Bedroom 3 gable window"  40  6  40 10  sill 3 head 6.667
+window window_double "Bedroom 4 gable window"  40 18  40 22  sill 3 head 6.667
+
+fixture sink   "Bath 2 sink"     20.4 23.3
+fixture toilet "Bath 2 toilet"   20.4 21.2
+fixture tub    "Bath 2 tub"      25.6 22.5
+
+# ---- contents, second floor ---------------------------------------------------
+place bed_full        "Bedroom 2 bed"         3.55 14.0  rot 90
+place nightstand      "Bedroom 2 nightstand"  1.1  10.8  rot 90
+place dresser         "Bedroom 2 dresser"     8.0   4.15 rot 180
+place closet_clothing "Bedroom 2 clothing rack" 12.0 23.8
+place wastebasket     "Bedroom 2 wastebasket" 14.8  4.0
+item "Bedroom 2 curtains"
+  part fabric 0.8   0.2 7.5 2.6   0.5 8.5 7.0     # open, gathered to the side
+  part fabric 0.8   0.2 11.5 2.6   0.5 12.5 7.0
+  part fabric 0.8   0.2 15.5 2.6   0.5 16.5 7.0     # open, gathered to the side
+  part fabric 0.8   0.2 19.5 2.6   0.5 20.5 7.0
+end
+
+place bed_twin        "Bedroom 3 bed"        36.5   8.0  rot 270
+place desk            "Bedroom 3 desk"       24.0   4.4  rot 180
+place office_chair    "Bedroom 3 desk chair" 24.0   6.3
+place chest_of_drawers "Bedroom 3 chest"     30.0  12.85
+place wastebasket     "Bedroom 3 wastebasket" 26.5  4.0
+item "Bedroom 3 curtains"
+  part fabric 0.8   39.4 5.5 2.6   39.7 6.5 7.0     # open, gathered to the side
+  part fabric 0.8   39.4 9.5 2.6   39.7 10.5 7.0
+end
+
+place bed_twin        "Bedroom 4 bed"        36.5  19.5  rot 270
+place dresser         "Bedroom 4 dresser"    31.0  24.15
+place nightstand      "Bedroom 4 nightstand" 38.6  22.9  rot 270
+item "Bedroom 4 curtains"
+  part fabric 0.8   39.4 17.5 2.6   39.7 18.5 7.0     # open, gathered to the side
+  part fabric 0.8   39.4 21.5 2.6   39.7 22.5 7.0
+end
+
+place bathtub_60      "Bath 2 tub"           24.35 22.5  rot 270
+place vanity_36       "Bath 2 vanity"        21.3  23.3  rot 90
+place toilet          "Bath 2 toilet"        21.5  21.0  rot 90
+place wastebasket     "Bath 2 wastebasket"   25.4  20.6
+
+# ---- knee-wall attic storage (behind the knee walls, y 0-3 and 25-28) ---------
+place cardboard_boxes   "Knee-wall attic boxes SW"   6.0  1.6
+place storage_bin_stack "Knee-wall attic totes S"   10.0  1.7
+place storage_bin       "Knee-wall attic tote SE"   30.0  1.7
+place cardboard_boxes   "Knee-wall attic boxes NW"   8.0 26.4  rot 180
+place storage_bin_stack "Knee-wall attic totes N"   32.0 26.3  rot 180

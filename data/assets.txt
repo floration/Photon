@@ -377,3 +377,18 @@ asset cardboard_boxes
   part paper 25        -18 -9 0     18 9 36
   source "PROTOTYPE estimate"
 end
+
+# ---------------------------------------------------------------- seasonal ---
+asset christmas_tree_dry
+  name "Christmas tree, 7 ft, cut and dried (needles as porous fuel)"
+  size 54 54 88
+  source "PROTOTYPE masses: ~2.1 m tree as in NIST TN 2131; foliage split estimated (verify against NIST FR 4010 / TN 2131 tree masses)"
+  part steel        4   -8 -8 0     8 8 6        # stand
+  part lumber_spf   6   -2 -2 6     2 2 84       # trunk
+  part dry_conifer  3.0 -27 -27 12  27 27 26     # foliage, bottom tier
+  part dry_conifer  2.4 -23 -23 26  23 23 40
+  part dry_conifer  1.8 -19 -19 40  19 19 54
+  part dry_conifer  1.2 -14 -14 54  14 14 68
+  part dry_conifer  0.6  -9  -9 68   9  9 80
+  part dry_conifer  0.2  -4  -4 80   4  4 88
+end

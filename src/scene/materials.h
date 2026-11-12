@@ -38,6 +38,10 @@ struct Material {
     float aerosolYield = 0.02f;     // kg light pyrolysis aerosol / kg off-gassed
     float charYield = 0.0f;         // kg char (or inert residue) / kg original
     float surfaceDepth = 0.005f;    // m, heated surface layer used by the lumped node
+    // Porous fuel (needles, excelsior, loose fill): an item part of this material
+    // fills its cells as fuel in open air instead of a solid block. Exposed
+    // surface area per kg of fuel (m2/kg); 0 = solid.
+    float porousArea = 0;
     // Non-combustible failure (fall-off, crack-out, melt); 0 = never
     float failTemp = 0;             // K
     float failTime = 0;             // s above failTemp before the layer is gone

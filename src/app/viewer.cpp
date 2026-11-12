@@ -102,6 +102,12 @@ private:
     int scriptShot_ = 0, scriptFrame_ = 0;
     float scriptTime_ = 0;
     bool scriptDoor1_ = false, scriptDoor2_ = false, scriptWindows_ = false;
+    // script options (main.cpp passes them after the prefix, '|' separated)
+    std::string scriptItem_ = "Bedroom 1 bed";
+    float scriptKw_ = 100.0f, scriptIgnDur_ = 300.0f;
+    bool scriptEvents_ = true;
+    std::vector<float> scriptTimes_ = {30, 60, 90, 120, 180, 240, 300};
+    Vec3 scriptEye_ = Vec3(4.45f, 5.45f, 1.55f), scriptAt_ = Vec3(2.2f, 7.6f, 0.7f);
     void runScript(double now, bool& quit);
     int stillFrame_ = 0;
     std::vector<float> shots_ = {20, 75, 150, 240, 330, 420};
@@ -157,7 +163,39 @@ private:
 
 bool Viewer::init(const std::string& scenePath, const std::string& demo, std::string& err) {
     if (demo.rfind("shot:", 0) == 0) { still_ = demo.substr(5); running_ = false; help_ = false; }
-    else if (demo.rfind("test:", 0) == 0) { script_ = demo.substr(5); help_ = false; showScene_ = false; }
+    else if (demo.rfind("test:", 0) == 0) {
+        // test:<prefix>|<item>|<kW>|<seconds>|events|noevents|<t1,t2,..>|<ex,ey,ez,ax,ay,az>
+        std::vector<std::string> f;
+        std::string rest = demo.substr(5);
+        for (size_t a = 0;;) {
+            size_t b = rest.find('|', a);
+            f.push_back(rest.substr(a, b == std::string::npos ? std::string::npos : b - a));
+            if (b == std::string::npos) break;
+            a = b + 1;
+        }
+        auto nums = [](const std::string& t) {
+            std::vector<float> v;
+            for (size_t a = 0; a < t.size();) {
+                size_t b = t.find(',', a);
+                v.push_back((float)std::atof(t.substr(a, b == std::string::npos ? std::string::npos : b - a).c_str()));
+                if (b == std::string::npos) break;
+                a = b + 1;
+            }
+            return v;
+        };
+        script_ = f[0];
+        if (f.size() > 1 && !f[1].empty()) scriptItem_ = f[1];
+        if (f.size() > 2 && !f[2].empty()) scriptKw_ = (float)std::atof(f[2].c_str());
+        if (f.size() > 3 && !f[3].empty()) scriptIgnDur_ = (float)std::atof(f[3].c_str());
+        if (f.size() > 4) scriptEvents_ = f[4] != "noevents";
+        if (f.size() > 5 && !f[5].empty()) scriptTimes_ = nums(f[5]);
+        if (f.size() > 6 && !f[6].empty()) {
+            std::vector<float> c = nums(f[6]);
+            if (c.size() == 6) { scriptEye_ = Vec3(c[0], c[1], c[2]); scriptAt_ = Vec3(c[3], c[4], c[5]); }
+        }
+        help_ = false;
+        showScene_ = false;
+    }
     else demo_ = demo;
     std::string base = exeDir();
     if (!lib_.loadGases(base + "data/gases.txt", err)) return false;
@@ -177,7 +215,7 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     if (!script_.empty()) {
         hideRoof_ = false;
         speedIdx_ = NSPEED - 1;
-        igniteItem("Bedroom 1 bed", 100.0f, 300.0f);
+        igniteItem(scriptItem_, scriptKw_, scriptIgnDur_);
     }
     if (!demo_.empty()) {
         help_ = false;
@@ -1205,6 +1243,7 @@ void Viewer::runScript(double now, bool& quit) {
             if (scene_.openings[o].name == n) { s.toggleOpening((int)o); userToggles_.push_back((int)o); }
         meshDirty_ = true;
     };
+    if (!scriptEvents_) scriptDoor1_ = scriptDoor2_ = scriptWindows_ = true;
     if (!scriptDoor1_ && s.time >= 30.0f) { scriptDoor1_ = true; openByName("Front door"); }
     if (!scriptDoor2_ && s.time >= 60.0f) { scriptDoor2_ = true; openByName("Back door"); }
     if (!scriptWindows_ && s.time >= 80.0f) {
@@ -1214,8 +1253,7 @@ void Viewer::runScript(double now, bool& quit) {
         s.addEvent("script-windows", "All windows broken out (test script)");
         meshDirty_ = true;
     }
-    const float times[7] = {30.0f, 60.0f, 90.0f, 120.0f, 180.0f, 240.0f, 300.0f};
-    if (!scriptCapturing_ && scriptStep_ < 7 && s.time >= times[scriptStep_]) {
+    if (!scriptCapturing_ && scriptStep_ < (int)scriptTimes_.size() && s.time >= scriptTimes_[scriptStep_]) {
         scriptCapturing_ = true;
         running_ = false;
         scriptShot_ = 0;
@@ -1270,10 +1308,10 @@ void Viewer::run() {
             (void)quitNow;
             if (scriptCapturing_) {
                 struct V { Vec3 eye, at; bool smoke, fire; const char* tag; } views[5] = {
-                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), true, true, "room_smoke_fire"},
-                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), true, false, "room_smoke_only"},
-                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), false, true, "room_fire_only"},
-                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), false, false, "room_clear"},
+                    {scriptEye_, scriptAt_, true, true, "room_smoke_fire"},
+                    {scriptEye_, scriptAt_, true, false, "room_smoke_only"},
+                    {scriptEye_, scriptAt_, false, true, "room_fire_only"},
+                    {scriptEye_, scriptAt_, false, false, "room_clear"},
                     {Vec3(-7.0f, -6.5f, 4.5f), Vec3(5.5f, 4.5f, 2.2f), true, true, "outside"}};
                 V& vw = views[scriptShot_];
                 if (scriptFrame_ == 0) {
@@ -1283,14 +1321,14 @@ void Viewer::run() {
                     meshDirty_ = true;
                 }
                 if (++scriptFrame_ == 4) {
-                    static const int kT[7] = {30, 60, 90, 120, 180, 240, 300}; int t = kT[scriptStep_];
+                    int t = (int)std::lround(scriptTimes_[scriptStep_]);
                     ren_.saveScreenshot(script_ + "_" + std::to_string(t) + "s_" + vw.tag + ".bmp", plat_.width(), plat_.height());
                     scriptFrame_ = 0;
                     if (++scriptShot_ >= 5) {
                         scriptCapturing_ = false;
                         ++scriptStep_;
                         ropt_.smoke = ropt_.fire = true;
-                        if (scriptStep_ >= 7) break;
+                        if (scriptStep_ >= (int)scriptTimes_.size()) break;
                         running_ = true;
                     }
                 }
