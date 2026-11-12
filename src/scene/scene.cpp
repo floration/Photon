@@ -203,6 +203,19 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
             float xa = std::min(s.x0, s.x1), xb = std::max(s.x0, s.x1), ya = std::min(s.y0, s.y1), yb = std::max(s.y0, s.y1);
             s.x0 = xa; s.x1 = xb; s.y0 = ya; s.y1 = yb;
             stairs.push_back(s);
+        } else if (k == "fixture") {
+            // fixture <type> "<name>" x y
+            Fixture fx;
+            fx.story = curStory;
+            if (t.size() < 5) { err = where(f, l) + "fixture <type> \"<name>\" x y"; return false; }
+            fx.type = t[1];
+            fx.name = t[2];
+            if (!num(3, fx.x) || !num(4, fx.y)) return false;
+            static const char* known[] = {"panel", "water_heater", "sink", "kitchen_sink", "toilet", "tub", "washer", "range"};
+            bool okType = false;
+            for (const char* kn : known) okType = okType || fx.type == kn;
+            if (!okType) { err = where(f, l) + "unknown fixture type '" + fx.type + "'"; return false; }
+            fixtures.push_back(fx);
         } else if (k == "item") {
             items.push_back(Item{});
             item = &items.back();

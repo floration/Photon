@@ -1,16 +1,32 @@
-// Photon - expands the scene's construction description into physical objects:
-// every framing member, gypsum and OSB sheet at standard 4 x 8 ft size,
-// subfloor and roof-deck panels, door slabs, window units, floor coverings and
-// furniture parts, each at its true size and position.
+// Photon - staged house builder. Expands the scene's construction description
+// into physical objects in the order a real house is built:
+//   1 floorplan   2 MEP layout   3 framing   4 rough-in   5 insulation
+//   6 walls       7 roofing      8 exterior  9 interior
+// Every object records the stage that installs it. Sizes come from the
+// component library (data/components.txt) where it has them.
 #include "scene/scene.h"
 #include <algorithm>
 #include <cmath>
 
 namespace photon {
 
+const char* stageName(int stage) {
+    switch (stage) {
+    case STAGE_FLOORPLAN: return "1 Floorplan";
+    case STAGE_MEP_LAYOUT: return "2 Wire and pipe layout";
+    case STAGE_FRAMING: return "3 Framing";
+    case STAGE_ROUGH_IN: return "4 Rough-in (wiring, plumbing)";
+    case STAGE_INSULATION: return "5 Insulation";
+    case STAGE_WALLS: return "6 Sheathing, drywall, paint";
+    case STAGE_ROOFING: return "7 Roofing";
+    case STAGE_EXTERIOR: return "8 Exterior";
+    case STAGE_INTERIOR: return "9 Interior";
+    }
+    return "?";
+}
+
 namespace {
-constexpr float FT = 0.3048f;
-float SHEET_W = 4 * FT, SHEET_L = 8 * FT;   // standard 4 x 8 ft panel; from data/components.txt
+constexpr float IN = 0.0254f, FT = 0.3048f;
 
 void cross3(const float a[3], const float b[3], float o[3]) {
     o[0] = a[1] * b[2] - a[2] * b[1];
@@ -34,6 +50,16 @@ const char* memberName(MemberKind k) {
     }
     return "member";
 }
+
+struct P3 { float x, y, z; };
+// A planned run of cable or pipe (MEP layout stage), installed at rough-in.
+struct Run {
+    std::string name, kind;   // kind: "cable", "water line", "drain"
+    int material = -1;
+    float thick = 0, width = 0;   // cross-section (m)
+    std::vector<P3> pts;
+};
+struct Device { std::string name, kind; P3 p; float nx, ny; };   // kind: receptacle, switch, light; (nx,ny) faces into the room
 } // namespace
 
 bool SceneObject::contains(const float p[3], float tol) const {
@@ -63,53 +89,403 @@ float Scene::layerOffset(const MaterialLibrary& lib, const Assembly& a, int laye
 
 void Scene::generateObjects(const MaterialLibrary& lib) {
     objects.clear();
-    if (const Component* c = lib.component("sheet_4x8")) { SHEET_W = c->thickness; SHEET_L = c->width; }
-    auto add = [&](const std::string& name, const std::string& kind, int mat, int story, const float c[3],
+    int stage = STAGE_FLOORPLAN;
+    auto comp = [&](const char* id, float t, float w) {
+        if (const Component* c = lib.component(id)) return std::make_pair(c->thickness, c->width);
+        return std::make_pair(t * IN, w * IN);
+    };
+    auto mat = [&](const char* id) { return lib.findMaterial(id); };
+    const auto sheet = comp("sheet_4x8", 48, 96);
+    const float SHEET_W = sheet.first, SHEET_L = sheet.second;
+    const float H = ceilingHeight;
+
+    auto add = [&](const std::string& name, const std::string& kind, int m, int story, const float c[3],
                    const float u[3], const float v[3], float hu, float hv, float hn) -> SceneObject& {
         SceneObject o;
         o.id = (int)objects.size() + 1;
+        o.stage = stage;
         o.name = name;
         o.kind = kind;
-        o.material = mat;
+        o.material = m;
         o.story = story;
         for (int i = 0; i < 3; ++i) { o.c[i] = c[i]; o.u[i] = u[i]; o.v[i] = v[i]; }
+        norm3(o.u);
+        norm3(o.v);
         cross3(o.u, o.v, o.n);
         norm3(o.n);
         o.hu = hu; o.hv = hv; o.hn = hn;
         objects.push_back(o);
         return objects.back();
     };
-    // ---- framing members ----------------------------------------------------
+    auto addBoxXYZ = [&](const std::string& name, const std::string& kind, int m, int story, float x0, float y0, float z0,
+                         float x1, float y1, float z1) -> SceneObject& {
+        float c[3] = {0.5f * (x0 + x1), 0.5f * (y0 + y1), 0.5f * (z0 + z1)}, u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
+        return add(name, kind, m, story, c, u, v, 0.5f * std::fabs(x1 - x0), 0.5f * std::fabs(y1 - y0), 0.5f * std::fabs(z1 - z0));
+    };
+    // a straight piece of cable or pipe between two points
+    auto addSegment = [&](const std::string& name, const std::string& kind, int m, P3 a, P3 b, float thick, float wid) {
+        float d[3] = {b.x - a.x, b.y - a.y, b.z - a.z};
+        float L = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (L < 0.005f) return;
+        float u[3] = {d[0] / L, d[1] / L, d[2] / L};
+        float v[3] = {0, 0, 1};
+        if (std::fabs(u[2]) > 0.9f) { v[0] = 1; v[2] = 0; }
+        float c[3] = {0.5f * (a.x + b.x), 0.5f * (a.y + b.y), 0.5f * (a.z + b.z)};
+        add(name, kind, m, storyAt(c[2]), c, u, v, 0.5f * L, 0.5f * wid, 0.5f * thick);
+    };
+
+    // ============================================================ 1 floorplan
+    // Slab on grade (4 in), the plan itself (rooms, walls, openings, stairs)
+    // and the fixture locations everything later is routed to.
+    addBoxXYZ("Slab on grade, 4 in concrete", "slab", mat("concrete"), 0, 0, 0, -4 * IN, width, depth, 0);
+
+    // ============================================================ 2 MEP layout
+    stage = STAGE_MEP_LAYOUT;
+    std::vector<Run> runs;
+    std::vector<Device> devices;
+    auto findFixture = [&](const char* type) -> const Fixture* {
+        for (const Fixture& f : fixtures) if (f.type == type) return &f;
+        return nullptr;
+    };
+    auto onOpening = [&](int story, bool alongX, float line, float s) {
+        for (const Opening& o : openings) {
+            if (o.story != story || (o.y0 == o.y1) != alongX) continue;
+            float oc = alongX ? o.y0 : o.x0;
+            if (std::fabs(oc - line) > 0.05f) continue;
+            float a = alongX ? std::min(o.x0, o.x1) : std::min(o.y0, o.y1), b = alongX ? std::max(o.x0, o.x1) : std::max(o.y0, o.y1);
+            if (o.kind == OpeningKind::Window) continue;   // receptacles under windows are fine
+            if (s > a - 0.15f && s < b + 0.15f) return true;
+        }
+        return false;
+    };
+    const float WALL_IN = 2.25f * IN;        // stud half-depth: device boxes sit in the stud cavity
+    const auto nm14 = comp("nm_14_2", 0.20f, 0.36f), nm12 = comp("nm_12_2", 0.22f, 0.40f);
+    const Fixture* panel = findFixture("panel");
+    P3 panelP = panel ? P3{panel->x, panel->y, storyBase(panel->story) + 1.5f} : P3{0.3f, 0.3f, 1.5f};
+    int panelStory = panel ? panel->story : 0;
+    auto ceilingRunZ = [&](int st) { return storyBase(st) + H + 0.12f; };   // joist space or attic
+    // Manhattan route at a given height: up/down, along x, along y, then to the end
+    auto route = [&](P3 a, P3 b, float zRun) {
+        std::vector<P3> p;
+        p.push_back(a);
+        p.push_back({a.x, a.y, zRun});
+        p.push_back({b.x, a.y, zRun});
+        p.push_back({b.x, b.y, zRun});
+        p.push_back(b);
+        return p;
+    };
+    auto homeRun = [&](P3 from, int story) {
+        // up into this story's ceiling, across to the panel, down through floors to the panel
+        std::vector<P3> p = route(from, {panelP.x, panelP.y, ceilingRunZ(story)}, ceilingRunZ(story));
+        p.push_back(panelP);
+        (void)panelStory;
+        return p;
+    };
+    int circuit = 1;
+    for (size_t ri = 0; ri < rooms.size(); ++ri) {
+        const Room& r = rooms[ri];
+        float zb = storyBase(r.story);
+        bool wet = r.name.find("Kitchen") != std::string::npos || r.name.find("Bath") != std::string::npos ||
+                   r.name.find("Powder") != std::string::npos || r.name.find("Laundry") != std::string::npos;
+        bool hall = r.name.find("Hall") != std::string::npos || r.name.find("hall") != std::string::npos;
+        auto cable = wet ? nm12 : nm14;
+        std::string gauge = wet ? "12/2" : "14/2";
+        // receptacles: none more than 12 ft apart along the walls (NEC 210.52(A)), 16 in to center
+        std::vector<P3> recs;
+        float edges[4][4] = {{r.x0, r.y0, r.x1, r.y0}, {r.x1, r.y0, r.x1, r.y1}, {r.x1, r.y1, r.x0, r.y1}, {r.x0, r.y1, r.x0, r.y0}};
+        for (auto& e : edges) {
+            bool alongX = e[1] == e[3];
+            float a = alongX ? e[0] : e[1], b = alongX ? e[2] : e[3];
+            float line = alongX ? e[1] : e[0];
+            float L = std::fabs(b - a), dir = b > a ? 1.f : -1.f;
+            if (hall && L < 3.0f) continue;
+            // inward normal (rooms are rectangles: inside is toward the center)
+            float cxr = 0.5f * (r.x0 + r.x1), cyr = 0.5f * (r.y0 + r.y1);
+            float nx = alongX ? 0 : (cxr > line ? 1.f : -1.f), ny = alongX ? (cyr > line ? 1.f : -1.f) : 0;
+            for (float s = 0.6f; s < L - 0.3f; s += 12 * FT) {
+                float pos = a + dir * s;
+                if (onOpening(r.story, alongX, line, pos)) pos += dir * 0.5f;
+                if (onOpening(r.story, alongX, line, pos)) continue;
+                P3 p = alongX ? P3{pos, line + ny * WALL_IN, zb + 16 * IN} : P3{line + nx * WALL_IN, pos, zb + 16 * IN};
+                recs.push_back(p);
+                devices.push_back({r.name + " receptacle", "receptacle", p, nx, ny});
+                if (hall) break;
+            }
+        }
+        // kitchen counters: a receptacle every 4 ft at 44 in (NEC 210.52(C))
+        for (const Item& it : items) {
+            if (it.story != r.story || it.name.find("base cabinets") == std::string::npos) continue;
+            for (const Part& pt : it.parts) {
+                bool alongX = (pt.box.x1 - pt.box.x0) > (pt.box.y1 - pt.box.y0);
+                float wallLine = alongX ? (std::fabs(pt.box.y1 - r.y1) < std::fabs(pt.box.y0 - r.y0) ? r.y1 : r.y0)
+                                        : (std::fabs(pt.box.x1 - r.x1) < std::fabs(pt.box.x0 - r.x0) ? r.x1 : r.x0);
+                float a = alongX ? pt.box.x0 : pt.box.y0, b = alongX ? pt.box.x1 : pt.box.y1;
+                float inward = (alongX ? (wallLine == r.y1 ? -1.f : 1.f) : (wallLine == r.x1 ? -1.f : 1.f));
+                for (float s = a + 0.5f; s < b; s += 4 * FT) {
+                    P3 p = alongX ? P3{s, wallLine + inward * WALL_IN, zb + 44 * IN} : P3{wallLine + inward * WALL_IN, s, zb + 44 * IN};
+                    recs.push_back(p);
+                    devices.push_back({r.name + " counter receptacle", "receptacle", p, alongX ? 0 : inward, alongX ? inward : 0});
+                }
+            }
+        }
+        if (!recs.empty()) {
+            Run run;
+            run.name = "Circuit " + std::to_string(circuit++) + ": " + r.name + " receptacles, NM-B " + gauge;
+            run.kind = "cable";
+            run.material = mat("nm_cable");
+            run.thick = cable.first;
+            run.width = cable.second;
+            // daisy-chain through the studs at 24 in, then home run to the panel
+            run.pts = homeRun(recs[0], r.story);
+            std::reverse(run.pts.begin(), run.pts.end());
+            for (size_t i = 1; i < recs.size(); ++i) {
+                P3 a = recs[i - 1], b = recs[i];
+                float zc = zb + 24 * IN;
+                run.pts.push_back({a.x, a.y, zc});
+                if (std::fabs(a.x - b.x) > 0.01f && std::fabs(a.y - b.y) > 0.01f) {
+                    // turn the corner along the walls, never across the room
+                    bool aOnXWall = std::fabs(a.y - (r.y0 + WALL_IN)) < 0.03f || std::fabs(a.y - (r.y1 - WALL_IN)) < 0.03f;
+                    run.pts.push_back(aOnXWall ? P3{b.x, a.y, zc} : P3{a.x, b.y, zc});
+                }
+                run.pts.push_back({b.x, b.y, zc});
+                run.pts.push_back(b);
+            }
+            runs.push_back(run);
+        }
+        // switch at the first doorway into the room (48 in), ceiling light at the room center
+        P3 light{0.5f * (r.x0 + r.x1), 0.5f * (r.y0 + r.y1), zb + H + 1.0f * IN};
+        devices.push_back({r.name + " ceiling light box", "light", light, 0, 0});
+        for (const Opening& o : openings) {
+            if (o.story != r.story || o.kind == OpeningKind::Window) continue;
+            bool alongX = o.y0 == o.y1;
+            float line = alongX ? o.y0 : o.x0;
+            bool onEdge = alongX ? (std::fabs(line - r.y0) < 0.05f || std::fabs(line - r.y1) < 0.05f)
+                                 : (std::fabs(line - r.x0) < 0.05f || std::fabs(line - r.x1) < 0.05f);
+            if (!onEdge) continue;
+            float b = alongX ? std::max(o.x0, o.x1) : std::max(o.y0, o.y1);
+            float hiLim = alongX ? r.x1 : r.y1, loLim = alongX ? r.x0 : r.y0;
+            float pos = b + 6 * IN;
+            if (pos > hiLim - 0.1f) pos = (alongX ? std::min(o.x0, o.x1) : std::min(o.y0, o.y1)) - 6 * IN;
+            if (pos < loLim + 0.1f) continue;
+            float cxr = 0.5f * (r.x0 + r.x1), cyr = 0.5f * (r.y0 + r.y1);
+            float nx = alongX ? 0 : (cxr > line ? 1.f : -1.f), ny = alongX ? (cyr > line ? 1.f : -1.f) : 0;
+            P3 sw = alongX ? P3{pos, line + ny * WALL_IN, zb + 48 * IN} : P3{line + nx * WALL_IN, pos, zb + 48 * IN};
+            devices.push_back({r.name + " light switch", "switch", sw, nx, ny});
+            Run sl;
+            sl.name = r.name + " switch leg, NM-B 14/2";
+            sl.kind = "cable";
+            sl.material = mat("nm_cable");
+            sl.thick = nm14.first;
+            sl.width = nm14.second;
+            sl.pts = route(sw, light, ceilingRunZ(r.story));
+            runs.push_back(sl);
+            break;
+        }
+    }
+    // lighting circuits: one per story, panel -> each light, nearest first
+    for (int st = 0; st < stories; ++st) {
+        std::vector<P3> lights;
+        for (const Device& d : devices)
+            if (d.kind == "light" && storyAt(d.p.z - 0.2f) == st) lights.push_back(d.p);
+        if (lights.empty()) continue;
+        Run run;
+        run.name = "Circuit " + std::to_string(circuit++) + ": story " + std::to_string(st + 1) + " lighting, NM-B 14/2";
+        run.kind = "cable";
+        run.material = mat("nm_cable");
+        run.thick = nm14.first;
+        run.width = nm14.second;
+        run.pts = homeRun(lights[0], st);
+        std::reverse(run.pts.begin(), run.pts.end());
+        std::vector<bool> used(lights.size(), false);
+        used[0] = true;
+        P3 cur = lights[0];
+        for (size_t n = 1; n < lights.size(); ++n) {
+            size_t best = 0;
+            float bd = 1e9f;
+            for (size_t i = 0; i < lights.size(); ++i) {
+                if (used[i]) continue;
+                float d = std::fabs(lights[i].x - cur.x) + std::fabs(lights[i].y - cur.y);
+                if (d < bd) { bd = d; best = i; }
+            }
+            used[best] = true;
+            P3 nx = lights[best];
+            float zr = ceilingRunZ(st);
+            run.pts.push_back({cur.x, cur.y, zr});
+            run.pts.push_back({nx.x, cur.y, zr});
+            run.pts.push_back({nx.x, nx.y, zr});
+            run.pts.push_back(nx);
+            cur = nx;
+        }
+        runs.push_back(run);
+    }
+    // plumbing: PEX supply from the water heater through the first-floor joist
+    // space to every fixture; PVC drain/waste/vent to one stack through the roof.
+    const Fixture* heater = findFixture("water_heater");
+    const auto pex12 = comp("pex_1_2", 0.625f, 0.625f), pex34 = comp("pex_3_4", 0.875f, 0.875f);
+    const auto dwv15 = comp("pvc_dwv_1_5", 1.9f, 1.9f), dwv2 = comp("pvc_dwv_2", 2.375f, 2.375f), dwv3 = comp("pvc_dwv_3", 3.5f, 3.5f);
+    const float zTrunk = stories > 1 ? storyBase(0) + H + 0.08f : storyBase(0) + H + 0.15f;
+    P3 heaterTop = heater ? P3{heater->x, heater->y, storyBase(heater->story) + 1.6f} : P3{0, 0, 1.6f};
+    if (heater) {
+        Run cold{"Cold water main, PEX 3/4 in", "water line", mat("polyethylene"), pex34.first, pex34.second, {}};
+        cold.pts = {{heater->x - 0.3f, heater->y, 0.0f}, {heater->x - 0.3f, heater->y, zTrunk}};
+        runs.push_back(cold);
+        Run hot{"Hot water trunk, PEX 3/4 in", "water line", mat("polyethylene"), pex34.first, pex34.second, {}};
+        hot.pts = {heaterTop, {heaterTop.x, heaterTop.y, zTrunk}};
+        runs.push_back(hot);
+    }
+    const Fixture* stackFx = nullptr;
+    for (const Fixture& f : fixtures)
+        if (f.type == "toilet" && (!stackFx || f.story > stackFx->story)) stackFx = &f;
+    P3 stack = stackFx ? P3{stackFx->x, stackFx->y, 0} : P3{width * 0.5f, depth * 0.5f, 0};
+    for (const Fixture& f : fixtures) {
+        bool water = f.type == "sink" || f.type == "kitchen_sink" || f.type == "toilet" || f.type == "tub" || f.type == "washer";
+        if (!water) continue;
+        float zb = storyBase(f.story);
+        float zFix = zb + (f.type == "tub" ? 0.3f : 0.5f);
+        if (heater) {
+            for (int hc = 0; hc < 2; ++hc) {
+                if (hc == 1 && f.type == "toilet") continue;   // toilets take cold only
+                float off = hc == 0 ? -0.05f : 0.05f;
+                Run w{f.name + (hc == 0 ? " cold supply" : " hot supply") + ", PEX 1/2 in", "water line", mat("polyethylene"),
+                      pex12.first, pex12.second, {}};
+                P3 src = hc == 0 ? P3{heater->x - 0.3f, heater->y, zTrunk} : P3{heaterTop.x, heaterTop.y, zTrunk};
+                w.pts = {src, {f.x + off, src.y, zTrunk}, {f.x + off, f.y, zTrunk}, {f.x + off, f.y, zFix}};
+                runs.push_back(w);
+            }
+        }
+        // drain to the stack: under the slab on the first floor, in the joist space above it
+        auto d = f.type == "toilet" ? dwv3 : (f.type == "sink" ? dwv15 : dwv2);
+        std::string size = f.type == "toilet" ? "3 in" : (f.type == "sink" ? "1-1/2 in" : "2 in");
+        float zRun = f.story == 0 ? -0.25f : storyBase(f.story) - 0.12f;
+        float slope = 0.25f * IN / FT;   // 1/4 in per ft toward the stack
+        float len = std::fabs(stack.x - f.x) + std::fabs(stack.y - f.y);
+        Run dr{f.name + " drain, PVC DWV " + size, "drain", mat("pvc_vinyl"), d.first, d.second, {}};
+        dr.pts = {{f.x, f.y, zb + 0.15f}, {f.x, f.y, zRun}, {stack.x, f.y, zRun - slope * std::fabs(stack.x - f.x)},
+                  {stack.x, stack.y, zRun - slope * len}};
+        runs.push_back(dr);
+    }
+    if (stackFx) {
+        float D = depth;
+        float run = stack.y <= 0.5f * D ? stack.y : D - stack.y;
+        float roofZ = roofBase() + 3.5f * IN * std::sqrt(1 + pitch * pitch) + pitch * run;
+        Run st{"Drain/waste/vent stack, PVC DWV 3 in", "drain", mat("pvc_vinyl"), dwv3.first, dwv3.second, {}};
+        st.pts = {{stack.x, stack.y, -0.4f}, {stack.x, stack.y, roofZ + 0.3f}};
+        runs.push_back(st);
+    }
+
+    // ============================================================ 3 framing
+    stage = STAGE_FRAMING;
     for (const Member& m : members) {
         float d[3] = {m.p1[0] - m.p0[0], m.p1[1] - m.p0[1], m.p1[2] - m.p0[2]};
         float L = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
         if (L < 1e-5f) continue;
         float u[3] = {d[0] / L, d[1] / L, d[2] / L}, v[3] = {m.side[0], m.side[1], m.side[2]};
-        norm3(v);
         float c[3] = {0.5f * (m.p0[0] + m.p1[0]), 0.5f * (m.p0[1] + m.p1[1]), 0.5f * (m.p0[2] + m.p1[2])};
         std::string nm = memberName(m.kind);
         add(nm, nm, m.material, storyAt(c[2]), c, u, v, 0.5f * L, 0.5f * m.width, 0.5f * m.depth);
     }
-    // ---- wall sheets (gypsum, sheathing, siding) at their layer positions -----
+    for (int s = 0; s + 1 < stories && subfloor >= 0; ++s) {   // subfloor is nailed down during framing
+        const Assembly& as = lib.assemblies[subfloor];
+        float plane = storyBase(s + 1);
+        int k = 0;
+        for (const Layer& ly : as.layers) {
+            const Material& m = lib.materials[ly.material];
+            for (float y = 0; y < depth - 0.01f; y += SHEET_W)
+                for (float x = 0; x < width - 0.01f; x += SHEET_L, ++k) {
+                    float xe = std::min(width, x + SHEET_L), ye = std::min(depth, y + SHEET_W);
+                    bool inStair = false;
+                    for (const Stair& st : stairs)
+                        if (st.story == s && 0.5f * (x + xe) > st.x0 && 0.5f * (x + xe) < st.x1 && 0.5f * (y + ye) > st.y0 &&
+                            0.5f * (y + ye) < st.y1) inStair = true;
+                    if (inStair) continue;
+                    addBoxXYZ(m.name + " subfloor panel " + std::to_string(k + 1), "subfloor panel", ly.material, s + 1, x, y,
+                              plane - ly.thickness, xe, ye, plane);
+                }
+        }
+    }
+
+    // ============================================================ 4 rough-in
+    stage = STAGE_ROUGH_IN;
+    const auto box = comp("device_box", 2.0f, 3.0f);
+    for (const Device& d : devices) {
+        float c[3] = {d.p.x, d.p.y, d.p.z};
+        float u[3] = {std::fabs(d.ny) > 0.5f ? 1.f : 0.f, std::fabs(d.ny) > 0.5f ? 0.f : 1.f, 0.f}, v[3] = {0, 0, 1};
+        if (d.kind == "light") { u[0] = 1; u[1] = 0; v[0] = 0; v[1] = 1; v[2] = 0; }   // ceiling box lies flat
+        add(d.name, d.kind == "light" ? "ceiling box" : "device box (" + d.kind + ")", mat("pvc_vinyl"), storyAt(d.p.z - 0.1f), c, u, v,
+            0.5f * box.first, 0.5f * box.second, 1.25f * IN);
+    }
+    if (panel) {
+        float zb = storyBase(panel->story);
+        addBoxXYZ("Electrical service panel, 200 A", "panel", mat("steel"), panel->story, panel->x - 7 * IN, panel->y - 2 * IN,
+                  zb + 1.0f, panel->x + 7 * IN, panel->y + 2 * IN, zb + 1.0f + 30 * IN);
+    }
+    if (heater) {
+        float zb = storyBase(heater->story);
+        addBoxXYZ("Water heater, 50 gal gas-fired", "water heater", mat("steel"), heater->story, heater->x - 11 * IN,
+                  heater->y - 11 * IN, zb, heater->x + 11 * IN, heater->y + 11 * IN, zb + 60 * IN);
+    }
+    for (const Run& r : runs) {
+        if (r.material < 0) continue;
+        for (size_t i = 1; i < r.pts.size(); ++i) addSegment(r.name, r.kind, r.material, r.pts[i - 1], r.pts[i], r.thick, r.width);
+    }
+
+    // ============================================================ 5 insulation
+    stage = STAGE_INSULATION;
+    const auto batt = comp("batt_r13", 3.5f, 15.0f);
+    for (const Wall& w : walls) {
+        if (!w.exterior) continue;
+        bool alongX = w.y0 == w.y1;
+        float a = alongX ? std::min(w.x0, w.x1) : std::min(w.y0, w.y1), b = alongX ? std::max(w.x0, w.x1) : std::max(w.y0, w.y1);
+        float line = alongX ? w.y0 : w.x0;
+        float half = 3.5f * IN * 0.5f + 0.5f * IN;
+        float cline = line <= 0.0f ? line + half : line - half;   // stud centerline (framing is pulled inside)
+        float zb = storyBase(w.story) + 1.5f * IN, zt = storyBase(w.story) + H - 3.0f * IN;
+        int k = 0;
+        for (float s = a + 0.75f * IN; s + 0.1f < b; s += studSpacing) {
+            float s0 = s + 0.75f * IN, s1 = std::min(b - 0.75f * IN, s + studSpacing - 0.75f * IN);
+            if (s1 - s0 < 0.05f) continue;
+            bool blocked = false;
+            for (const Opening& o : openings) {
+                if (o.story != w.story || (o.y0 == o.y1) != alongX || std::fabs((alongX ? o.y0 : o.x0) - line) > 0.05f) continue;
+                float oa = alongX ? std::min(o.x0, o.x1) : std::min(o.y0, o.y1), ob = alongX ? std::max(o.x0, o.x1) : std::max(o.y0, o.y1);
+                if (s1 > oa && s0 < ob) blocked = true;
+            }
+            if (blocked) continue;
+            float c[3] = {alongX ? 0.5f * (s0 + s1) : cline, alongX ? cline : 0.5f * (s0 + s1), 0.5f * (zb + zt)};
+            float u[3] = {alongX ? 1.f : 0.f, alongX ? 0.f : 1.f, 0}, v[3] = {0, 0, 1};
+            add("R-13 fiberglass batt " + std::to_string(++k), "insulation batt", mat("fiberglass"), w.story, c, u, v, 0.5f * (s1 - s0),
+                0.5f * (zt - zb), 0.5f * batt.first);
+        }
+    }
+    {
+        const Assembly& as = lib.assemblies[ceiling];
+        float plane = roofBase();
+        for (size_t l = 0; l < as.layers.size(); ++l) {
+            const Layer& ly = as.layers[l];
+            const Material& m = lib.materials[ly.material];
+            if (m.density >= 50) continue;
+            float zc = plane + layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
+            float c[3] = {0.5f * width, 0.5f * depth, zc}, u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
+            add(m.name + " (attic, blown)", "insulation", ly.material, stories - 1, c, u, v, 0.5f * width, 0.5f * depth, 0.5f * ly.thickness);
+        }
+    }
+
+    // ============================================================ 6 walls
+    stage = STAGE_WALLS;
     for (const Wall& w : walls) {
         const Assembly& as = lib.assemblies[w.assembly];
         bool alongX = w.y0 == w.y1;
         float a = alongX ? std::min(w.x0, w.x1) : std::min(w.y0, w.y1);
         float b = alongX ? std::max(w.x0, w.x1) : std::max(w.y0, w.y1);
         float line = alongX ? w.y0 : w.x0;
-        // layers run toward +axis unless this is an exterior wall on the +axis side of the house
-        float outward = 1.0f;
-        if (w.exterior) {
-            bool onLow = line <= 0.0f;
-            outward = onLow ? -1.0f : 1.0f;   // inside (layer 0) faces the interior
-        }
+        float outward = w.exterior ? (line <= 0.0f ? -1.0f : 1.0f) : 1.0f;
         float zb = storyBase(w.story);
-        float H = ceilingHeight;
         float u[3] = {alongX ? 1.f : 0.f, alongX ? 0.f : 1.f, 0.f}, v[3] = {0, 0, 1};
         for (size_t l = 0; l < as.layers.size(); ++l) {
             const Layer& ly = as.layers[l];
-            if (ly.fill < 0.999f || ly.thickness < 0.001f) continue;   // framing (members) and coatings
+            if (ly.fill < 0.999f || ly.thickness < 0.001f) continue;   // framing and coatings
             const Material& m = lib.materials[ly.material];
+            if (std::string(m.id) == "pvc_vinyl") continue;              // siding goes on at the exterior stage
             float off = layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
             float pos = line + outward * off;
             int k = 0;
@@ -118,84 +494,59 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
                 float c[3];
                 if (alongX) { c[0] = 0.5f * (s + e); c[1] = pos; } else { c[0] = pos; c[1] = 0.5f * (s + e); }
                 c[2] = zb + 0.5f * H;
-                std::string nm = m.name + " sheet " + std::to_string(k + 1) + (w.exterior ? " (exterior wall)" : "");
+                bool painted = l > 0 && as.layers[l - 1].thickness < 0.001f;
+                painted = painted || (l + 1 < as.layers.size() && as.layers[l + 1].thickness < 0.001f);
+                std::string nm = m.name + " sheet " + std::to_string(k + 1) + (painted ? ", painted" : "") +
+                                 (w.exterior ? " (exterior wall)" : "");
                 add(nm, std::string(m.id) + " sheet", ly.material, w.story, c, u, v, 0.5f * (e - s), 0.5f * H, 0.5f * ly.thickness);
             }
         }
     }
-    // ---- ceilings, attic insulation, subfloors -------------------------------
-    for (int s = 0; s < stories; ++s) {
+    for (int s = 0; s < stories; ++s) {   // ceilings
         bool top = s == stories - 1;
         int ai = top ? ceiling : floorCeiling;
-        if (ai >= 0) {
-            const Assembly& as = lib.assemblies[ai];
-            float plane = storyBase(s) + ceilingHeight;
-            for (size_t l = 0; l < as.layers.size(); ++l) {
-                const Layer& ly = as.layers[l];
-                if (ly.thickness < 0.001f) continue;
-                const Material& m = lib.materials[ly.material];
-                float zc = plane + layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
-                float u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
-                if (m.density < 50) {   // loose-fill insulation: one blanket over the ceiling
-                    float c[3] = {0.5f * width, 0.5f * depth, zc};
-                    add(m.name + " (attic)", "insulation", ly.material, s, c, u, v, 0.5f * width, 0.5f * depth, 0.5f * ly.thickness);
-                    continue;
-                }
-                int k = 0;
-                for (float y = 0; y < depth - 0.01f; y += SHEET_W)
-                    for (float x = 0; x < width - 0.01f; x += SHEET_L, ++k) {
-                        float xe = std::min(width, x + SHEET_L), ye = std::min(depth, y + SHEET_W);
-                        float c[3] = {0.5f * (x + xe), 0.5f * (y + ye), zc};
-                        add(m.name + " ceiling sheet " + std::to_string(k + 1), std::string(m.id) + " sheet", ly.material, s, c, u, v,
-                            0.5f * (xe - x), 0.5f * (ye - y), 0.5f * ly.thickness);
-                    }
-            }
-        }
-        if (!top && subfloor >= 0) {
-            const Assembly& as = lib.assemblies[subfloor];
-            float plane = storyBase(s + 1);
+        if (ai < 0) continue;
+        const Assembly& as = lib.assemblies[ai];
+        float plane = storyBase(s) + H;
+        for (size_t l = 0; l < as.layers.size(); ++l) {
+            const Layer& ly = as.layers[l];
+            const Material& m = lib.materials[ly.material];
+            if (ly.thickness < 0.001f || m.density < 50) continue;
+            float zc = plane + layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
             int k = 0;
-            for (const Layer& ly : as.layers) {
-                const Material& m = lib.materials[ly.material];
-                for (float y = 0; y < depth - 0.01f; y += SHEET_W)
-                    for (float x = 0; x < width - 0.01f; x += SHEET_L, ++k) {
-                        float xe = std::min(width, x + SHEET_L), ye = std::min(depth, y + SHEET_W);
-                        bool inStair = false;
-                        for (const Stair& st : stairs)
-                            if (st.story == s && 0.5f * (x + xe) > st.x0 && 0.5f * (x + xe) < st.x1 && 0.5f * (y + ye) > st.y0 &&
-                                0.5f * (y + ye) < st.y1) inStair = true;
-                        if (inStair) continue;
-                        float c[3] = {0.5f * (x + xe), 0.5f * (y + ye), plane - 0.5f * ly.thickness};
-                        float u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
-                        add(m.name + " subfloor panel " + std::to_string(k + 1), "subfloor panel", ly.material, s + 1, c, u, v,
-                            0.5f * (xe - x), 0.5f * (ye - y), 0.5f * ly.thickness);
-                    }
-            }
+            for (float y = 0; y < depth - 0.01f; y += SHEET_W)
+                for (float x = 0; x < width - 0.01f; x += SHEET_L, ++k) {
+                    float xe = std::min(width, x + SHEET_L), ye = std::min(depth, y + SHEET_W);
+                    float c[3] = {0.5f * (x + xe), 0.5f * (y + ye), zc}, u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
+                    add(m.name + " ceiling sheet " + std::to_string(k + 1) + ", painted", std::string(m.id) + " sheet", ly.material, s, c,
+                        u, v, 0.5f * (xe - x), 0.5f * (ye - y), 0.5f * ly.thickness);
+                }
         }
     }
-    // ---- roof deck panels and shingle field per slope ------------------------
+
+    // ============================================================ 7 roofing
+    stage = STAGE_ROOFING;
+    const float RB = roofBase(), D = depth, oh = eaveOverhang;
+    const float cosT = 1.0f / std::sqrt(1 + pitch * pitch), sinT = pitch * cosT;
+    const float chord = 3.5f * IN / cosT;
     {
         const Assembly& as = lib.assemblies[roof];
-        const float RB = roofBase(), D = depth, oh = eaveOverhang;
-        const float cosT = 1.0f / std::sqrt(1 + pitch * pitch), sinT = pitch * cosT;
-        const float chord = 3.5f * 0.0254f / cosT;   // deck sits on the 2x4 top chords
         const float slopeLen = (0.5f * D + oh) / cosT;
         for (int side = 0; side < 2; ++side) {
-            float sgn = side == 0 ? 1.f : -1.f;   // south slope rises toward +y
+            float sgn = side == 0 ? 1.f : -1.f;
             float v[3] = {0, sgn * cosT, sinT}, u[3] = {1, 0, 0};
             float ystart = side == 0 ? -oh : D + oh;
             float z0 = RB + chord - pitch * oh;
+            float nrm[3];
+            cross3(u, v, nrm);
+            norm3(nrm);
+            if (nrm[2] < 0) for (float& q : nrm) q = -q;
             float off = 0;
             for (size_t l = 0; l < as.layers.size(); ++l) {
                 const Layer& ly = as.layers[l];
                 const Material& m = lib.materials[ly.material];
-                float t = ly.thickness;
-                float nrm[3];
-                cross3(u, v, nrm);
-                norm3(nrm);
-                if (nrm[2] < 0) for (float& q : nrm) q = -q;
-                float lift = off + 0.5f * t;
-                if (m.density > 1000) {   // shingle field: one object per slope
+                float t = ly.thickness, lift = off + 0.5f * t;
+                if (m.density > 1000) {
                     float sm = 0.5f * slopeLen;
                     float c[3] = {0.5f * width, ystart + sgn * sm * cosT + nrm[1] * lift, z0 + sm * sinT + nrm[2] * lift};
                     add(m.name + (side == 0 ? " (south slope)" : " (north slope)"), "roofing", ly.material, stories - 1, c, u, v,
@@ -215,46 +566,110 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
             }
         }
     }
-    // ---- doors and windows ----------------------------------------------------
-    for (const Opening& o : openings) {
-        if (o.kind == OpeningKind::Cased || o.assembly < 0) continue;
+
+    // ============================================================ 8 exterior
+    stage = STAGE_EXTERIOR;
+    const auto course = comp("siding_course", 0.044f, 8.0f);
+    const auto gut = comp("gutter_k5", 5.0f, 5.0f), dsp = comp("downspout", 2.0f, 3.0f), fasc = comp("board_1x6", 0.75f, 5.5f);
+    const int vinyl = mat("pvc_vinyl");
+    auto slopeTop = [&](float y) { float run = y <= 0.5f * D ? y : D - y; return RB + pitch * run; };
+    {
+        const Assembly& ew = lib.assemblies[extWall];
+        float outer = 0;
+        for (size_t l = 0; l < ew.layers.size(); ++l)
+            if (std::string(lib.materials[ew.layers[l].material].id) == "pvc_vinyl") outer = layerOffset(lib, ew, (int)l, false) + 0.5f * ew.layers[l].thickness;
+        const float pieceL = 12 * FT;
+        // wall courses, story by story, from the slab to the eaves
+        for (int side = 0; side < 4; ++side) {
+            bool alongX = side % 2 == 0;
+            float line = side == 0 ? 0 : side == 1 ? width : side == 2 ? depth : 0;
+            float len = alongX ? width : depth;
+            float pos = (side == 0 || side == 3) ? line - outer : line + outer;
+            float u[3] = {alongX ? 1.f : 0.f, alongX ? 0.f : 1.f, 0}, v[3] = {0, 0, 1};
+            int k = 0;
+            for (float z = 0; z < RB - 0.01f; z += course.second)
+                for (float s = 0; s < len - 0.01f; s += pieceL) {
+                    float e = std::min(len, s + pieceL), zt = std::min(RB, z + course.second);
+                    float c[3] = {alongX ? 0.5f * (s + e) : pos, alongX ? pos : 0.5f * (s + e), 0.5f * (z + zt)};
+                    if (side == 2) c[1] = depth + outer;
+                    if (side == 1) c[0] = width + outer;
+                    add("Vinyl siding course " + std::to_string(++k), "siding course", vinyl, storyAt(c[2]), c, u, v,
+                        0.5f * (e - s), 0.5f * (zt - z), 0.5f * course.first);
+                }
+        }
+        // gable ends, trimmed to the roof line
+        for (int end = 0; end < 2; ++end) {
+            float x = end == 0 ? -outer : width + outer;
+            float u[3] = {0, 1, 0}, v[3] = {0, 0, 1};
+            int k = 0;
+            for (float z = RB; z < slopeTop(0.5f * D) - 0.02f; z += course.second) {
+                float zt = std::min(slopeTop(0.5f * D), z + course.second);
+                float run = (0.5f * (z + zt) - RB) / pitch;
+                float y0 = run, y1 = D - run;
+                if (y1 - y0 < 0.05f) break;
+                float c[3] = {x, 0.5f * (y0 + y1), 0.5f * (z + zt)};
+                add("Vinyl siding course, gable " + std::to_string(++k), "siding course", vinyl, stories - 1, c, u, v,
+                    0.5f * (y1 - y0), 0.5f * (zt - z), 0.5f * course.first);
+            }
+        }
+    }
+    for (int side = 0; side < 2; ++side) {   // soffit, fascia, gutter along each eave
+        float yIn = side == 0 ? 0.0f : D, yOut = side == 0 ? -oh : D + oh;
+        float zEdge = RB + chord - pitch * oh;
+        float a = std::min(yIn, yOut), b = std::max(yIn, yOut);
+        addBoxXYZ(side == 0 ? "Vented vinyl soffit (south eave)" : "Vented vinyl soffit (north eave)", "soffit", vinyl, stories - 1, 0, a,
+                  RB - 0.03f, width, b, RB - 0.03f + 0.0011f);
+        float fy = side == 0 ? yOut - 0.5f * fasc.first : yOut + 0.5f * fasc.first;
+        addBoxXYZ(side == 0 ? "Fascia board (south eave)" : "Fascia board (north eave)", "fascia", mat("lumber_spf"), stories - 1, 0,
+                  fy - 0.5f * fasc.first, zEdge - fasc.second, width, fy + 0.5f * fasc.first, zEdge);
+        float gy = side == 0 ? yOut - fasc.first - 0.5f * gut.first : yOut + fasc.first + 0.5f * gut.first;
+        addBoxXYZ(side == 0 ? "5 in K-style gutter (south)" : "5 in K-style gutter (north)", "gutter", mat("aluminum"), stories - 1, 0,
+                  gy - 0.5f * gut.first, zEdge - 0.08f - gut.second, width, gy + 0.5f * gut.first, zEdge - 0.08f);
+        for (float x : {0.15f, width - 0.15f}) {
+            addBoxXYZ("Downspout, 2 x 3 in", "downspout", mat("aluminum"), 0, x - 0.5f * dsp.second, gy - 0.5f * dsp.first, 0.0f,
+                      x + 0.5f * dsp.second, gy + 0.5f * dsp.first, zEdge - 0.08f - gut.second);
+        }
+    }
+    auto addOpening = [&](const Opening& o) {
         const Assembly& as = lib.assemblies[o.assembly];
         float total = 0;
         for (const Layer& l : as.layers) total += l.thickness;
         bool alongX = o.y0 == o.y1;
-        float a = alongX ? std::min(o.x0, o.x1) : std::min(o.y0, o.y1);
-        float b = alongX ? std::max(o.x0, o.x1) : std::max(o.y0, o.y1);
+        float a = alongX ? std::min(o.x0, o.x1) : std::min(o.y0, o.y1), b = alongX ? std::max(o.x0, o.x1) : std::max(o.y0, o.y1);
         float line = alongX ? o.y0 : o.x0;
-        float zb = storyBase(o.story);
         float c[3];
         if (alongX) { c[0] = 0.5f * (a + b); c[1] = line; } else { c[0] = line; c[1] = 0.5f * (a + b); }
-        c[2] = zb + 0.5f * (o.sill + o.head);
+        c[2] = storyBase(o.story) + 0.5f * (o.sill + o.head);
         float u[3] = {alongX ? 1.f : 0.f, alongX ? 0.f : 1.f, 0.f}, v[3] = {0, 0, 1};
         bool door = o.kind == OpeningKind::Door;
-        add(o.name, door ? "door slab" : "window unit", as.layers[0].material, o.story, c, u, v, 0.5f * (b - a),
-            0.5f * (o.head - o.sill), 0.5f * std::max(total, 0.006f));
-    }
-    // ---- floor coverings --------------------------------------------------------
+        add(o.name, door ? "door slab" : "window unit", as.layers[0].material, o.story, c, u, v, 0.5f * (b - a), 0.5f * (o.head - o.sill),
+            0.5f * std::max(total, 0.006f));
+    };
+    auto isExterior = [&](const Opening& o) {
+        bool alongX = o.y0 == o.y1;
+        float line = alongX ? o.y0 : o.x0;
+        return std::fabs(line) < 0.05f || std::fabs(line - (alongX ? depth : width)) < 0.05f;
+    };
+    for (const Opening& o : openings)
+        if (o.kind != OpeningKind::Cased && o.assembly >= 0 && isExterior(o)) addOpening(o);
+
+    // ============================================================ 9 interior
+    stage = STAGE_INTERIOR;
+    for (const Opening& o : openings)
+        if (o.kind != OpeningKind::Cased && o.assembly >= 0 && !isExterior(o)) addOpening(o);
     for (const Room& r : rooms) {
         if (r.floorMaterial < 0) continue;
         const Material& m = lib.materials[r.floorMaterial];
         float t = std::max(0.002f, r.floorArealMass / m.density);
-        float c[3] = {0.5f * (r.x0 + r.x1), 0.5f * (r.y0 + r.y1), storyBase(r.story) + 0.5f * t};
-        float u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
-        add(r.name + " floor: " + m.name, "floor covering", r.floorMaterial, r.story, c, u, v, 0.5f * (r.x1 - r.x0),
-            0.5f * (r.y1 - r.y0), 0.5f * t);
+        float zb = storyBase(r.story);
+        addBoxXYZ(r.name + " floor: " + m.name, "floor covering", r.floorMaterial, r.story, r.x0, r.y0, zb, r.x1, r.y1, zb + t);
     }
-    // ---- furniture parts ----------------------------------------------------
-    for (size_t it = 0; it < items.size(); ++it) {
+    for (size_t it = 0; it < items.size(); ++it)
         for (const Part& p : items[it].parts) {
-            float c[3] = {0.5f * (p.box.x0 + p.box.x1), 0.5f * (p.box.y0 + p.box.y1), 0.5f * (p.box.z0 + p.box.z1)};
-            float u[3] = {1, 0, 0}, v[3] = {0, 1, 0};
-            SceneObject& o = add(items[it].name + " - " + lib.materials[p.material].name, "furniture part", p.material,
-                                 items[it].story, c, u, v, 0.5f * (p.box.x1 - p.box.x0), 0.5f * (p.box.y1 - p.box.y0),
-                                 0.5f * (p.box.z1 - p.box.z0));
+            SceneObject& o = addBoxXYZ(items[it].name + " - " + lib.materials[p.material].name, "furniture part", p.material,
+                                       items[it].story, p.box.x0, p.box.y0, p.box.z0, p.box.x1, p.box.y1, p.box.z1);
             o.item = (int)it;
         }
-    }
 }
 
 } // namespace photon

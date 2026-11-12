@@ -198,6 +198,31 @@ TEST(scene_objects) {
     CHECK(std::fabs(off - (-(1.75f * 0.0254f) - 0.5f * 0.0127f)) < 1e-4f);
 }
 
+TEST(build_stages_complete) {
+    World& w = world();
+    int perStage[STAGE_COUNT + 1] = {};
+    int cables = 0, water = 0, drains = 0, receptacles = 0, batts = 0, siding = 0, gutters = 0, trash = 0;
+    for (const SceneObject& o : w.scene.objects) {
+        CHECK_MSG(o.stage >= STAGE_FLOORPLAN && o.stage <= STAGE_COUNT, o.name);
+        if (o.stage >= 1 && o.stage <= STAGE_COUNT) perStage[o.stage]++;
+        if (o.kind == "cable") ++cables;
+        if (o.kind == "water line") ++water;
+        if (o.kind == "drain") ++drains;
+        if (o.kind == "device box (receptacle)") ++receptacles;
+        if (o.kind == "insulation batt") ++batts;
+        if (o.kind == "siding course") ++siding;
+        if (o.kind == "gutter") ++gutters;
+        if (o.name.find("trash") != std::string::npos || o.name.find("wastebasket") != std::string::npos) ++trash;
+    }
+    for (int s = STAGE_FLOORPLAN; s <= STAGE_COUNT; ++s)
+        if (s != STAGE_MEP_LAYOUT) CHECK_MSG(perStage[s] > 0, std::string("no objects in stage ") + stageName(s));
+    CHECK(cables > 50 && water > 10 && drains > 5 && receptacles > 30);
+    CHECK(batts > 50 && siding > 50 && gutters == 2 && trash >= 4);
+    // wiring and plumbing are installed before the walls close
+    for (const SceneObject& o : w.scene.objects)
+        if (o.kind == "cable" || o.kind == "water line" || o.kind == "drain") CHECK(o.stage == STAGE_ROUGH_IN);
+}
+
 // ------------------------------------------------------------ discretizer --
 TEST(discretizer_invariants) {
     World& w = world();

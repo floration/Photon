@@ -81,6 +81,16 @@ window window_double "Powder room window"     22 30  24 30  sill 4.5 head 6.667
 
 stair 24 16.3  34 19.7  +x              # 3 ft 5 in wide, rises east to the upper hall
 
+# fixtures: the MEP layout stage routes wiring and plumbing to these
+#        type          name                         x     y
+fixture panel        "Main electrical panel"       25.8  23.5
+fixture water_heater "Water heater"                25.0  21.2
+fixture washer       "Washer box"                  21.5  24.9
+fixture kitchen_sink "Kitchen sink"                 7.0  29.6
+fixture range        "Range"                       11.25 29.6
+fixture sink         "Powder room sink"            21.4  29.6
+fixture toilet       "Powder room toilet"          24.5  29.6
+
 # ---- contents, story 1 ------------------------------------------------------
 # part <material> <mass kg> x0 y0 z0  x1 y1 z1   (feet; z above this floor)
 # Masses are PROTOTYPE estimates; Phase 6 checks items against NIST TN 2303.
@@ -191,6 +201,17 @@ end
 item "Dryer"
   part steel 55        22.7 22.7 0   24.9 24.9 3
 end
+item "Kitchen trash can"                # polyethylene can and bag, mixed paper waste
+  part polyethylene 2    13.3 17.6 0   14.5 18.8 2.2
+  part paper 4           13.5 17.8 0.2 14.3 18.6 2.0
+end
+item "Office recycling bin"
+  part paper 3           31.5 28.4 0   32.6 29.5 1.3
+end
+item "Powder room wastebasket"
+  part polyethylene 0.3  25.0 26.0 0   25.8 26.8 1.0
+  part paper 0.5         25.1 26.1 0.1 25.7 26.7 0.9
+end
 item "Powder room vanity"
   part osb 15          20.4 28.5 0   22.4 29.6 2.8
 end
@@ -216,6 +237,10 @@ door int_door_hollow "Bedroom 3 door"    26 13  28.667 13  closed
 door int_door_hollow "Bedroom 2 door"     8 20  10.667 20  open
 door int_door_hollow "Bath door"         20.5 20 23.167 20 open
 door int_door_hollow "Main bedroom door" 34 13.5 34 16.167 closed
+
+fixture sink   "Bath sink"     31.0 29.6
+fixture toilet "Bath toilet"   27.5 29.6
+fixture tub    "Bath tub"      22.7 29.6
 
 window window_double "Bedroom 1 south window"   6  0  10  0  sill 3   head 6.667
 window window_double "Bedroom 1 west window"    0  4   0  8  sill 3   head 6.667
@@ -277,6 +302,18 @@ item "Bedroom 3 curtains"
   part fabric 1.8      24.5 0.2 2.6   29.5 0.5 7.4
 end
 
+item "Bath wastebasket"
+  part polyethylene 0.3  33.0 27.0 0   33.8 27.8 1.0
+  part paper 0.5         33.1 27.1 0.1 33.7 27.7 0.9
+end
+item "Bedroom 3 wastebasket"
+  part polyethylene 0.3  25.0 0.6 0   25.8 1.4 1.0
+  part paper 0.8         25.1 0.7 0.1 25.7 1.3 0.9
+end
+item "Main bedroom wastebasket"
+  part polyethylene 0.3  40.0 0.6 0   40.8 1.4 1.0
+  part paper 0.6         40.1 0.7 0.1 40.7 1.3 0.9
+end
 item "Bath vanity"
   part osb 20          29 28.5 0   33 29.6 2.8
 end

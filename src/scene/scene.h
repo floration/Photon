@@ -74,8 +74,34 @@ struct Member {
 // window pane, furniture part. Oriented box: center, unit axes u v n, half sizes.
 // Phase 2 uses objects for display and identification; the per-object solid
 // model replaces the grid stand-ins in Phase 4.
+// Construction stages, in the order a real house is built. Every object records
+// the stage that installs it, so nothing gets skipped and the viewer can step
+// through the build.
+enum BuildStage : int {
+    STAGE_FLOORPLAN = 1,   // slab, layout of rooms, openings, fixtures
+    STAGE_MEP_LAYOUT,      // wire and pipe routes planned on the plan (no physical pieces)
+    STAGE_FRAMING,         // studs, plates, headers, joists, subfloor, stairs, trusses
+    STAGE_ROUGH_IN,        // wiring, boxes, panel, water lines, drain/waste/vent, water heater
+    STAGE_INSULATION,      // wall batts, attic insulation
+    STAGE_WALLS,           // sheathing, drywall, paint
+    STAGE_ROOFING,         // roof deck, shingles
+    STAGE_EXTERIOR,        // siding, soffit, fascia, gutters, windows, exterior doors
+    STAGE_INTERIOR,        // interior doors, floor coverings, furniture, appliances, trash
+    STAGE_COUNT = STAGE_INTERIOR
+};
+const char* stageName(int stage);
+
+// A fixture placed on the floorplan; MEP layout routes pipes and wires to it.
+struct Fixture {
+    std::string type;      // panel, water_heater, sink, kitchen_sink, toilet, tub, washer, range
+    std::string name;
+    int story = 0;
+    float x = 0, y = 0;    // plan position (m)
+};
+
 struct SceneObject {
     int id = 0;
+    int stage = 0;
     std::string name;
     std::string kind;            // "gypsum sheet", "stud", "door slab", ...
     int material = -1;
@@ -106,6 +132,7 @@ struct Scene {
     std::vector<Room> rooms;
     std::vector<Item> items;
     std::vector<Stair> stairs;
+    std::vector<Fixture> fixtures;
     std::vector<Member> members;              // generated framing
     std::vector<SceneObject> objects;         // every physical piece (framing, sheets, panels, parts)
 

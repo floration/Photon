@@ -98,6 +98,8 @@ private:
     void updateCamera();
     void handleInput(float frameDt);
     void drawPanels();
+    int buildStage_ = 0;           // construction view: show objects up to this stage (0 = simulation view)
+    void buildConstructionMesh();
     Ui ui_;
     bool showScene_ = true;
     float sceneScroll_ = 0;
@@ -359,9 +361,12 @@ void Viewer::handleInput(float frameDt) {
     if (in.keyPressed['V']) ropt_.fire = !ropt_.fire;
     if (in.keyPressed['T'] || in.keyPressed[KEY_F6]) ropt_.slice = !ropt_.slice;
     if (in.keyPressed['U']) { upperCut_ = !upperCut_; meshDirty_ = true; }
+    if (in.keyPressed['B']) { buildStage_ = buildStage_ ? 0 : STAGE_COUNT; meshDirty_ = true; }
+    if (buildStage_ && in.keyPressed[KEY_PAGEUP]) { buildStage_ = std::min(buildStage_ + 1, (int)STAGE_COUNT); meshDirty_ = true; }
+    if (buildStage_ && in.keyPressed[KEY_PAGEDOWN]) { buildStage_ = std::max(buildStage_ - 1, 1); meshDirty_ = true; }
     if (in.keyPressed['H'] || in.keyPressed[KEY_F1]) help_ = !help_;
-    if (in.keyPressed[KEY_PAGEUP]) ropt_.sliceZ = std::min(ropt_.sliceZ + 0.2f, scene_.ridgeHeight());
-    if (in.keyPressed[KEY_PAGEDOWN]) ropt_.sliceZ = std::max(ropt_.sliceZ - 0.2f, 0.1f);
+    if (!buildStage_ && in.keyPressed[KEY_PAGEUP]) ropt_.sliceZ = std::min(ropt_.sliceZ + 0.2f, scene_.ridgeHeight());
+    if (!buildStage_ && in.keyPressed[KEY_PAGEDOWN]) ropt_.sliceZ = std::max(ropt_.sliceZ - 0.2f, 0.1f);
     if (in.keyPressed[KEY_PLUS]) speedIdx_ = std::min(speedIdx_.load() + 1, NSPEED - 1);
     if (in.keyPressed[KEY_MINUS]) speedIdx_ = std::max(speedIdx_.load() - 1, 0);
     if (in.keyPressed[KEY_BACKSPACE]) resetSim();
@@ -473,6 +478,7 @@ void addBox(std::vector<Vertex>& v, Vec3 c, Vec3 ax, Vec3 ay, Vec3 az, Vec3 col,
 }
 
 void Viewer::buildMeshes() {
+    if (buildStage_ > 0) { buildConstructionMesh(); return; }
     const Solver& s = *sim_;
     std::vector<Vertex> op, glass;
     op.reserve(600000);
@@ -707,6 +713,47 @@ void Viewer::buildMeshes() {
     meshDirty_ = false;
 }
 
+// Construction view: the house's physical objects up to the selected build
+// stage, each drawn as its true oriented box in its material's color.
+void Viewer::buildConstructionMesh() {
+    std::vector<Vertex> op, glass;
+    op.reserve(800000);
+    {
+        float e = 30;
+        addQuad(op, Vec3(-e, -e, -0.12f), Vec3(scene_.width + e, -e, -0.12f), Vec3(scene_.width + e, scene_.depth + e, -0.12f),
+                Vec3(-e, scene_.depth + e, -0.12f), Vec3(0, 0, 1), Vec3(0.36f, 0.45f, 0.30f), Vec3());
+    }
+    const float zc = cutZ();
+    for (const SceneObject& o : scene_.objects) {
+        if (o.stage > buildStage_) continue;
+        if (o.c[2] - o.hv * std::fabs(o.v[2]) - o.hu * std::fabs(o.u[2]) - o.hn * std::fabs(o.n[2]) >= zc) continue;
+        if (hideRoof_ && (o.kind == "roofing" || o.kind == "roof deck panel")) continue;
+        const Material& m = lib_.materials[o.material];
+        Vec3 col(m.color[0], m.color[1], m.color[2]);
+        if (o.kind == "water line") col = o.name.find("cold") != std::string::npos || o.name.find("main") != std::string::npos
+                                              ? Vec3(0.20f, 0.40f, 0.90f) : Vec3(0.90f, 0.22f, 0.18f);
+        if (o.kind == "cable") col = o.name.find("12/2") != std::string::npos ? Vec3(0.95f, 0.80f, 0.20f) : Vec3(0.95f, 0.95f, 0.92f);
+        if (o.kind == "drain") col = Vec3(0.92f, 0.92f, 0.95f);
+        if (o.kind.find("device box") != std::string::npos || o.kind == "ceiling box") col = Vec3(0.20f, 0.45f, 0.95f);
+        if (o.kind == "insulation batt" || o.kind == "insulation") col = Vec3(0.98f, 0.70f, 0.72f);
+        if (o.name.find("painted") != std::string::npos) {
+            const Room* rm = scene_.roomAt(o.c[0], o.c[1], o.c[2]);
+            if (rm && o.name.find("ceiling") == std::string::npos) col = Vec3(rm->paint[0], rm->paint[1], rm->paint[2]);
+        }
+        Vec3 c(o.c[0], o.c[1], o.c[2]);
+        Vec3 ax = Vec3(o.u[0], o.u[1], o.u[2]) * o.hu, ay = Vec3(o.v[0], o.v[1], o.v[2]) * o.hv, az = Vec3(o.n[0], o.n[1], o.n[2]) * o.hn;
+        if (o.kind == "window unit") {
+            addBox(glass, c, ax, ay, az, Vec3(0.55f, 0.72f, 0.85f), Vec3());
+            continue;
+        }
+        addBox(op, c, ax, ay, az, col, Vec3());
+    }
+    ren_.setOpaque(op);
+    ren_.setGlass(glass);
+    lastMesh_ = plat_.now();
+    meshDirty_ = false;
+}
+
 void Viewer::uploadVolume() {
     const Solver& s = *sim_;
     vol_.resize((size_t)s.N * 4);
@@ -840,6 +887,14 @@ void Viewer::drawPanels() {
         if (ui_.button("Faster  (now " + spd + ")  [+]")) speedIdx_ = std::min(speedIdx_.load() + 1, NSPEED - 1);
         if (ui_.button("Slower  [-]")) speedIdx_ = std::max(speedIdx_.load() - 1, 0);
         if (ui_.button("Reset house  [Backspace]")) { resetSim(); haveSel_ = false; return; }
+        ui_.heading("Construction view  [B, PgUp/PgDn]");
+        if (ui_.button(buildStage_ ? std::string("Back to simulation view") : std::string("Show the house as built, stage by stage"), buildStage_ != 0)) {
+            buildStage_ = buildStage_ ? 0 : STAGE_COUNT;
+            meshDirty_ = true;
+        }
+        if (buildStage_)
+            for (int st = STAGE_FLOORPLAN; st <= STAGE_COUNT; ++st)
+                if (ui_.button(stageName(st), buildStage_ == st, 6)) { buildStage_ = st; meshDirty_ = true; }
         ui_.heading("View");
         if (ui_.checkbox("Hide roof  [R]", hideRoof_)) meshDirty_ = true;
         if (ui_.checkbox("Hide ceilings  [Z]", hideCeiling_)) meshDirty_ = true;
@@ -1030,18 +1085,22 @@ void Viewer::run() {    double last = plat_.now();
             drawOverlay();
             if (!demo_.empty() && shotIdx_ < shots_.size() && sim_->time >= shots_[shotIdx_]) done = true;
         }
-        ren_.render(plat_.width(), plat_.height(), vp_, eye_, ropt_);
+        RenderOptions ro = ropt_;
+        if (buildStage_) { ro.smoke = ro.fire = ro.slice = false; ro.fireLights.clear(); }
+        ren_.render(plat_.width(), plat_.height(), vp_, eye_, ro);
         if (in_.keyPressed[KEY_F12])
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
         if (!still_.empty()) {
             ++stillFrame_;
-            struct View { Vec3 eye, at; bool roofHidden; } views[3] = {
-                {Vec3(-9, -12, 11), Vec3(7, 5, 3), false},
-                {Vec3(7.6f, -6, 16), Vec3(7.6f, 4.6f, 2), true},
-                {Vec3(1.5f, 1.5f, 1.6f), Vec3(5, 4.5f, 1.2f), true}};
+            struct View { Vec3 eye, at; bool roofHidden; int stage; bool cut; } views[5] = {
+                {Vec3(-9, -12, 11), Vec3(7, 5, 3), false, 0, false},
+                {Vec3(-6, -9, 12), Vec3(7, 4.5f, 2), true, STAGE_FRAMING, false},
+                {Vec3(-4, -7, 9), Vec3(7, 4.5f, 2), true, STAGE_ROUGH_IN, true},
+                {Vec3(1.0f, 1.0f, 1.7f), Vec3(5, 4.5f, 1.2f), true, STAGE_ROUGH_IN, true},
+                {Vec3(-9, -12, 8), Vec3(7, 5, 3), false, STAGE_EXTERIOR, false}};
             int vi = stillFrame_ / 20;
-            if (vi >= 3) break;
-            if (stillFrame_ % 20 == 1) { lookFrom(views[vi].eye, views[vi].at); hideRoof_ = views[vi].roofHidden; upperCut_ = vi == 1; meshDirty_ = true; }
+            if (vi >= 5) break;
+            if (stillFrame_ % 20 == 1) { lookFrom(views[vi].eye, views[vi].at); hideRoof_ = views[vi].roofHidden; upperCut_ = views[vi].cut; buildStage_ = views[vi].stage; meshDirty_ = true; }
             if (stillFrame_ % 20 == 19) ren_.saveScreenshot(still_ + "_" + std::to_string(vi) + ".bmp", plat_.width(), plat_.height());
         }
         if (done) {

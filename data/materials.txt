@@ -313,3 +313,113 @@ material polypropylene
   offgas CO2 0.03
   offgas CO 0.02
 end
+
+material concrete
+  name "Normal-weight concrete (slab on grade)"
+  density 2300
+  conductivity 1.4
+  specific_heat 880
+  emissivity 0.9
+  combustible no
+  color 0.62 0.62 0.60
+  source "SFPE Handbook thermal property appendix, normal-weight concrete (verify)"
+end
+
+material copper
+  name "Copper (water tube, conductors)"
+  density 8960
+  conductivity 400
+  specific_heat 385
+  emissivity 0.3
+  combustible no
+  fail_temp 1358          # melts 1085 C
+  fail_time 5
+  color 0.80 0.48 0.30
+  source "Incropera & DeWitt, Table A.1, pure copper (verify)"
+end
+
+material aluminum
+  name "Aluminum (gutters, downspouts, flashing)"
+  density 2700
+  conductivity 205
+  specific_heat 900
+  emissivity 0.2
+  combustible no
+  fail_temp 933           # melts ~660 C
+  fail_time 5
+  color 0.86 0.86 0.84
+  source "Incropera & DeWitt, Table A.1, aluminum alloy (verify)"
+end
+
+material polyethylene
+  name "Polyethylene (PEX water tube, trash bags)"
+  density 940
+  conductivity 0.4
+  specific_heat 2300
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 640
+  heat_of_gasification 2.2e6
+  heat_of_combustion 40.0e6
+  soot_yield 0.06
+  aerosol_yield 0.03
+  char_yield 0.0
+  surface_depth 0.002
+  color 0.85 0.30 0.25
+  offgas TAR 0.60  # waxy oligomers
+  offgas C2H4 0.20
+  offgas CH4 0.10
+  offgas C3H6 0.10
+  source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, polyethylene (verify)"
+end
+
+material nm_cable
+  name "NM-B building wire (copper conductors, PVC insulation and jacket)"
+  density 3200            # composite: ~60% copper, ~40% PVC by mass
+  conductivity 1.0
+  specific_heat 700
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 570
+  heat_of_gasification 2.5e6
+  heat_of_combustion 7.7e6   # per kg of jacket off-gassed (PVC)
+  soot_yield 0.10
+  aerosol_yield 0.05
+  char_yield 0.65         # copper and char stay behind
+  surface_depth 0.002
+  color 0.92 0.88 0.70
+  offgas HCl 0.55
+  offgas TAR 0.20
+  offgas C6H6 0.08
+  offgas CO2 0.05
+  offgas C2H4 0.05
+  offgas CO 0.04
+  offgas C7H8 0.03
+  source "PROTOTYPE composite of PVC (Tewarson, SFPE Handbook) and copper; NM-B construction per UL 719 (verify)"
+end
+
+material paper
+  name "Paper and cardboard (trash, boxes)"
+  density 700
+  conductivity 0.10
+  specific_heat 1300
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 580
+  heat_of_gasification 2.2e6
+  heat_of_combustion 13.0e6
+  soot_yield 0.01
+  aerosol_yield 0.04
+  char_yield 0.15
+  surface_depth 0.001
+  color 0.78 0.70 0.55
+  offgas TAR 0.50
+  offgas H2O 0.15
+  offgas CO2 0.13
+  offgas CO 0.07
+  offgas C2H4O2 0.05
+  offgas CH4 0.03
+  offgas CH2O 0.04
+  offgas CH3OH 0.03
+  source "dHc, soot: Tewarson, SFPE Handbook, cellulosic materials (verify); off-gas split PROTOTYPE (cellulose pyrolysis)"
+end
