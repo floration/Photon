@@ -298,7 +298,8 @@ void Solver::flameRadiation() {
     const float A = dx * dx;
     struct Target { int kind; int idx; int side; float w; };
     std::mutex mtx;
-    std::vector<Target> deposits;
+    // deposits are applied in burn-list order so results do not depend on thread timing
+    std::vector<std::pair<int, std::vector<Target>>> chunks;
     pool_->parallelFor((int)burnList_.size(), [&](int lb, int le) {
     std::vector<Target> targets, local;
     for (int li = lb; li < le; ++li) {
@@ -351,9 +352,11 @@ void Solver::flameRadiation() {
         for (const Target& tg : targets) local.push_back({tg.kind, tg.idx, tg.side, P * tg.w * scale});
     }
     std::lock_guard<std::mutex> lk(mtx);
-    deposits.insert(deposits.end(), local.begin(), local.end());
+    chunks.emplace_back(lb, std::move(local));
     }, 16);
-    for (const Target& tg : deposits) {
+    std::sort(chunks.begin(), chunks.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (const auto& ch : chunks)
+    for (const Target& tg : ch.second) {
         if (tg.kind == 0) radQ[tg.idx] += tg.w;
         else barriers[tg.idx].radIn[tg.side] += tg.w;
     }

@@ -64,8 +64,17 @@ if(MINGW)
   target_link_options(photon_cli PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
+# ---- tests: fast unit/invariant tests (seconds), run with ctest or directly ---
+add_executable(photon_tests src/tests/test_main.cpp)
+target_link_libraries(photon_tests PRIVATE photon_sim)
+if(MINGW)
+  target_link_options(photon_tests PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+enable_testing()
+add_test(NAME photon_tests COMMAND photon_tests WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 # Copy data next to the executables so they run from the build folder.
-foreach(t photon photon_cli)
+foreach(t photon photon_cli photon_tests)
   add_custom_command(TARGET ${t} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:${t}>/data
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/scenes $<TARGET_FILE_DIR:${t}>/scenes)
