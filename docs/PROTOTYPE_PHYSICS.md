@@ -23,3 +23,7 @@ Known artefacts:
 - Results are sensitive to small changes, such as when a window falls out. That is partly real fire behavior and partly the coarse grid.
 - A closed house can starve the fire of oxygen. Opening a door or window, or waiting for a window to fail, brings it back.
 - Smoke can appear half a cell through a wall in the viewer. This comes from texture interpolation only; the solver does not leak.
+
+## Owner direction: an object-based house
+
+The house will be made of real objects, not cell boxes or zero-thickness faces. Each drywall sheet, sheathing panel, stud, joist, truss member, door slab, window and furniture part becomes an object with its own geometry, material, and thermal and burn state. The solver couples each object to the gas grid at its real surfaces, and burn-through removes the actual piece. Walls get real thickness and stud cavities, which the concealed-space model needs. The framing members already exist as objects in the scene. Planned in Phase 2 (object scene format), Phase 4 (per-object solid model) and Phase 5 (the generator emits objects).
