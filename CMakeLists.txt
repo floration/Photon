@@ -74,9 +74,10 @@ endif()
 enable_testing()
 add_test(NAME photon_tests COMMAND photon_tests WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-# Copy data next to the executables so they run from the build folder.
-foreach(t photon photon_cli photon_tests)
-  add_custom_command(TARGET ${t} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:${t}>/data
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/scenes $<TARGET_FILE_DIR:${t}>/scenes)
-endforeach()
+# Copy data next to the executables on every build (data edits need no relink).
+add_custom_target(copy_data ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data ${CMAKE_BINARY_DIR}/data
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/scenes ${CMAKE_BINARY_DIR}/scenes)
+add_dependencies(photon copy_data)
+add_dependencies(photon_cli copy_data)
+add_dependencies(photon_tests copy_data)
