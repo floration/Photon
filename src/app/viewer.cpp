@@ -105,6 +105,9 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
         speedIdx_ = NSPEED - 1;
         lookFrom(Vec3(10.5f, -4.5f, 8.5f), Vec3(3.5f, 3.0f, 0.5f));
         igniteItem("Sofa", 10.0f, 120.0f);
+        for (size_t o = 0; o < scene_.openings.size(); ++o)
+            if (scene_.openings[o].name == "Front door") sim_->toggleOpening((int)o);
+        lookFrom(Vec3(1.2f, 7.5f, 2.0f), Vec3(3.0f, 2.0f, 0.8f));
     }
     return true;
 }

@@ -65,7 +65,9 @@ uniform mat4 uInvVP;
 uniform vec3 uEye, uBoxMin, uBoxMax;
 uniform float uStep, uClipZ, uSliceZ, uTMin, uTMax;
 uniform int uSmoke, uSlice, uFire;
-uniform float uTime;
+uniform float uTime, uSmokeScale;
+uniform int uNumLights;
+uniform vec4 uLights[8];
 out vec4 o;
 
 vec3 worldAt(vec2 uv, float d) {
@@ -82,8 +84,8 @@ vec3 heatmap(float t) {
     return mix(c3, c4, (t - 0.75) / 0.25);
 }
 vec3 glowColor(float T) {   // rough incandescence ramp, dull red ~800 K to yellow-white
-    float t = clamp((T - 800.0) / 900.0, 0.0, 1.0);
-    return vec3(1.0, 0.25 + 0.6 * t, 0.05 + 0.45 * t * t) * t * t;
+    float t = clamp((T - 700.0) / 1000.0, 0.0, 1.0);
+    return vec3(1.0, 0.22 + 0.6 * t, 0.04 + 0.45 * t * t) * t * t;
 }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
@@ -144,10 +146,19 @@ void main() {
             vec3 p = ro + rd * t;
             vec4 v = texture(uVol, (p - uBoxMin) / (uBoxMax - uBoxMin));
             float soot = max(v.r, 0.0), aero = max(v.g, 0.0);
-            float sigma = 8700.0 * soot + 3000.0 * aero;
+            float sigma = (8700.0 * soot + 3000.0 * aero) * uSmokeScale;
             float a = uSmoke == 1 ? 1.0 - exp(-sigma * ds) : 0.0;
             float lightFrac = aero / (soot * 3.0 + aero + 1e-12);
             vec3 scat = mix(vec3(0.05, 0.05, 0.05), vec3(0.80, 0.78, 0.70), lightFrac);
+            if (uFire == 1) {   // smoke lit from inside by the fire (display; no radiation transport yet)
+                float alb = mix(0.45, 0.95, lightFrac);
+                vec3 fl = vec3(0.0);
+                for (int li = 0; li < uNumLights; ++li) {
+                    vec3 dl = uLights[li].xyz - p;
+                    fl += uLights[li].w / (0.6 + dot(dl, dl));
+                }
+                scat += vec3(1.0, 0.45, 0.15) * fl * alb * 0.9;
+            }
             vec3 emit = vec3(0.0);
             if (uFire == 1) {
                 float q = v.a / 1.0e6;                         // MW/m3 of heat release
@@ -159,7 +170,7 @@ void main() {
                     float k = clamp(0.25 * drive + 0.6 * n * shape, 0.0, 1.0);
                     emit = flameColor(k) * shape * drive * 6.0;
                 }
-                emit += glowColor(v.b) * clamp(sigma * 0.5, 0.0, 1.0) * 2.0;
+                emit += glowColor(v.b) * clamp(sigma * 0.6, 0.0, 1.0) * 4.0;
             }
             col += tr * (a * scat + emit * ds);
             tr *= 1.0 - a;
@@ -417,6 +428,12 @@ void Renderer::render(int w, int h, const Mat4& vp, const Vec3& eye, const Rende
     glUniform1i(glGetUniformLocation(volProg_, "uSlice"), opt.slice ? 1 : 0);
     glUniform1i(glGetUniformLocation(volProg_, "uFire"), opt.fire ? 1 : 0);
     glUniform1f(glGetUniformLocation(volProg_, "uTime"), opt.time);
+    glUniform1f(glGetUniformLocation(volProg_, "uSmokeScale"), opt.smokeScale);
+    {
+        int nl = opt.fire ? std::min(8, (int)opt.fireLights.size()) : 0;
+        glUniform1i(glGetUniformLocation(volProg_, "uNumLights"), nl);
+        if (nl > 0) glUniform4fv(glGetUniformLocation(volProg_, "uLights"), nl, &opt.fireLights[0].x);
+    }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, colorTex_);
     glUniform1i(glGetUniformLocation(volProg_, "uColor"), 0);

@@ -19,6 +19,7 @@ struct Vertex {
 struct RenderOptions {
     bool smoke = true;
     bool fire = true;
+    float smokeScale = 0.5f;        // display density multiplier on the physical extinction
     bool slice = false;
     float sliceZ = 1.5f;
     float clipZ = 1e9f;      // volume is hidden above this height (cutaway)
