@@ -101,6 +101,7 @@ private:
     struct Hit { int kind = 0; int cell = -1; int from = -1; int barrier = -1; Vec3 pos; };  // 1 floor, 2 solid, 3 barrier
     Hit pick(int mx, int my);
     std::string describe(const Hit& h);
+    const SceneObject* objectFor(const Hit& h);
 };
 
 bool Viewer::init(const std::string& scenePath, const std::string& demo, std::string& err) {
@@ -238,6 +239,46 @@ Viewer::Hit Viewer::pick(int mx, int my) {
     return h;
 }
 
+const SceneObject* Viewer::objectFor(const Hit& h) {
+    const Solver& s = *sim_;
+    float p[3];
+    float tol = 0.006f;
+    int item = -1;
+    if (h.kind == 3) {
+        // move from the face plane to the surface actually drawn on the camera's side
+        const Barrier& b = s.barriers[h.barrier];
+        const Assembly& as = lib_.assemblies[b.assembly];
+        bool centered = b.kind == BarrierKind::Door || b.kind == BarrierKind::Window;
+        bool fromA = h.from == b.cellA;
+        int asmSide = fromA == b.aIsInside ? 0 : 1;
+        int l = asmSide == 0 ? b.front : b.back;
+        float off = Scene::layerOffset(lib_, as, l, centered) + 0.5f * as.layers[l].thickness;   // middle of the exposed layer
+        float sgn = b.aIsInside ? 1.0f : -1.0f;
+        float d[3] = {0, 0, 0};
+        d[b.axis] = sgn * off;
+        p[0] = h.pos.x + d[0]; p[1] = h.pos.y + d[1]; p[2] = h.pos.z + d[2];
+        if (b.kind == BarrierKind::Roof || b.kind == BarrierKind::Window || b.kind == BarrierKind::Door) tol = 0.2f;
+    } else if (h.kind == 2) {
+        int i, j, k;
+        s.cellIJK(h.cell, i, j, k);
+        p[0] = s.ox + (i + 0.5f) * s.dx; p[1] = s.oy + (j + 0.5f) * s.dx; p[2] = s.oz + (k + 0.5f) * s.dx;
+        item = s.itemOf[h.cell];
+        tol = 0.15f;
+    } else if (h.kind == 1) {
+        p[0] = h.pos.x; p[1] = h.pos.y; p[2] = h.pos.z + 0.001f;
+        tol = 0.02f;
+    } else return nullptr;
+    const SceneObject* best = nullptr;
+    float bestVol = 1e30f;
+    for (const SceneObject& o : scene_.objects) {
+        if (item >= 0 && o.item != item) continue;
+        if (!o.contains(p, tol)) continue;
+        float vol = o.hu * o.hv * std::max(o.hn, 0.001f);
+        if (vol < bestVol) { bestVol = vol; best = &o; }
+    }
+    return best;
+}
+
 std::string Viewer::describe(const Hit& h) {
     const Solver& s = *sim_;
     if (h.kind == 0) return "";
@@ -272,6 +313,12 @@ std::string Viewer::describe(const Hit& h) {
     } else if (h.kind == 1) {
         int c = h.cell;
         if (s.fuelMat[c] >= 0) out += "  |  floor: " + lib_.materials[s.fuelMat[c]].name + "  " + fmt("%.0f C", s.fuelT[c] - 273.15);
+    }
+    // the physical object under the cursor
+    if (const SceneObject* o = objectFor(h)) {
+        auto in = [](float m) { return fmt("%.1f", m / 0.0254f); };
+        out += "\n" + std::string("Object #") + std::to_string(o->id) + ": " + o->name + "   " + in(2 * o->hu) + " x " + in(2 * o->hv) +
+               " x " + in(2 * o->hn) + " in   [" + o->kind + "]";
     }
     return out;
 }
@@ -705,9 +752,12 @@ void Viewer::drawOverlay() {
     ren_.text(x, y, tog, 0.8f, 0.9f, 1.0f);
     // hover line
     if (!hover_.empty()) {
-        float hy = (float)plat_.height() - lh - 8;
+        size_t nl = hover_.find('\n');
+        int lines = nl == std::string::npos ? 1 : 2;
+        float hy = (float)plat_.height() - lh * lines - 8;
         ren_.rect(0, hy - 4, (float)W, (float)plat_.height(), 0, 0, 0, 0.55f);
-        ren_.text(x, hy, hover_, 0.95f, 0.95f, 0.8f);
+        ren_.text(x, hy, hover_.substr(0, nl), 0.95f, 0.95f, 0.8f);
+        if (lines == 2) ren_.text(x, hy + lh, hover_.substr(nl + 1), 0.75f, 0.9f, 1.0f);
     }
     // event log
     int nev = (int)s.events.size();
