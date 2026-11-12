@@ -127,6 +127,7 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     if (demo.rfind("shot:", 0) == 0) { still_ = demo.substr(5); running_ = false; help_ = false; }
     else demo_ = demo;
     std::string base = exeDir();
+    if (!lib_.loadGases(base + "data/gases.txt", err)) return false;
     if (!lib_.loadMaterials(base + "data/materials.txt", err)) return false;
     if (!lib_.loadAssemblies(base + "data/assemblies.txt", err)) return false;
     if (!lib_.loadComponents(base + "data/components.txt", err)) return false;
@@ -912,6 +913,11 @@ void Viewer::drawPanels() {
                 ui_.label("soot yield " + fmt("%.3f", m.sootYield) + "   char " + fmt("%.2f", m.charYield));
             } else {
                 ui_.label(m.failTemp > 0 ? "non-combustible, fails near " + fmt("%.0f C", m.failTemp - 273.15) : "non-combustible");
+            }
+            if (!m.offgas.empty()) {
+                std::string og = "Off-gas: ";
+                for (const Offgas& g : m.offgas) og += lib_.gases[g.gas].id + " " + fmt("%.0f%%", g.massFraction * 100) + "  ";
+                while (!og.empty()) { size_t n = std::min<size_t>(og.size(), 44); ui_.label(og.substr(0, n), 0.95f, 0.8f, 0.6f); og.erase(0, n); }
             }
             std::string src = m.source;
             while (!src.empty()) {   // wrap the citation

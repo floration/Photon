@@ -25,6 +25,43 @@ static bool checkHeader(const TextFile& f, const char* magic, int supported, std
     return true;
 }
 
+bool MaterialLibrary::loadGases(const std::string& path, std::string& err) {
+    TextFile f;
+    if (!f.load(path, err)) return false;
+    if (!checkHeader(f, "photon_gases", GASES_VERSION, err)) return false;
+    Gas* cur = nullptr;
+    for (size_t li = 1; li < f.lines.size(); ++li) {
+        const TextLine& l = f.lines[li];
+        const std::string& k = l.tok[0];
+        if (k == "gas") {
+            if (l.tok.size() < 2) { err = where(f, l) + "gas needs an id"; return false; }
+            gases.push_back(Gas{});
+            cur = &gases.back();
+            cur->id = l.tok[1];
+            continue;
+        }
+        if (!cur) { err = where(f, l) + "value outside a gas block"; return false; }
+        if (k == "end") { cur = nullptr; continue; }
+        std::string val = l.tok.size() > 1 ? l.tok[1] : "";
+        if (k == "name") { cur->name = val; continue; }
+        if (k == "formula") { cur->formula = val; continue; }
+        if (k == "source") { cur->source += (cur->source.empty() ? "" : " | ") + val; continue; }
+        float* dst = k == "molar_mass" ? &cur->molarMass : k == "heat_of_combustion" ? &cur->heatOfCombustion
+                   : k == "autoignition" ? &cur->autoignition : k == "lfl" ? &cur->lfl : k == "ufl" ? &cur->ufl
+                   : k == "idlh" ? &cur->idlh : nullptr;
+        if (!dst) { err = where(f, l) + "unknown key '" + k + "'"; return false; }
+        bool ok;
+        *dst = (float)toNumber(val, ok);
+        if (!ok) { err = where(f, l) + "bad number '" + val + "'"; return false; }
+    }
+    return true;
+}
+
+int MaterialLibrary::findGas(const std::string& id) const {
+    for (size_t i = 0; i < gases.size(); ++i) if (gases[i].id == id) return (int)i;
+    return -1;
+}
+
 bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
     TextFile f;
     if (!f.load(path, err)) return false;
@@ -48,7 +85,34 @@ bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
             continue;
         }
         if (!cur) { err = where(f, l) + "value outside a material block"; return false; }
-        if (k == "end") { cur = nullptr; continue; }
+        if (k == "end") {
+            // off-gas fractions must describe all of the off-gas
+            if (!cur->offgas.empty()) {
+                float sum = 0;
+                for (const Offgas& o : cur->offgas) sum += o.massFraction;
+                if (sum < 0.98f || sum > 1.02f) {
+                    err = where(f, l) + "offgas fractions of '" + cur->id + "' sum to " + std::to_string(sum) + ", expected 1";
+                    return false;
+                }
+            } else if (cur->combustible) {
+                err = where(f, l) + "combustible material '" + cur->id + "' lists no offgas";
+                return false;
+            }
+            cur = nullptr;
+            continue;
+        }
+        if (k == "offgas") {
+            // offgas <gas id> <mass fraction>
+            if (l.tok.size() < 3) { err = where(f, l) + "offgas <gas> <mass fraction>"; return false; }
+            Offgas o;
+            o.gas = findGas(l.tok[1]);
+            if (o.gas < 0) { err = where(f, l) + "unknown gas '" + l.tok[1] + "' (load data/gases.txt first)"; return false; }
+            bool ok;
+            o.massFraction = (float)toNumber(l.tok[2], ok);
+            if (!ok) { err = where(f, l) + "bad number"; return false; }
+            cur->offgas.push_back(o);
+            continue;
+        }
         if (k == "name") { cur->name = l.tok.size() > 1 ? l.tok[1] : ""; continue; }
         if (k == "source") { cur->source += (cur->source.empty() ? "" : " | ") + (l.tok.size() > 1 ? l.tok[1] : ""); continue; }
         if (k == "combustible") { cur->combustible = l.tok.size() > 1 && l.tok[1] == "yes"; continue; }

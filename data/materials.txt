@@ -1,4 +1,4 @@
-photon_materials 1
+photon_materials 2
 # Photon material library - Phase 1 prototype set.
 #
 # Units: SI. Temperatures in kelvin.
@@ -16,6 +16,10 @@ photon_materials 1
 #   char_yield            kg char / inert residue left per kg of solid
 #   surface_depth         thickness of the heated surface node (prototype lumping)
 #   fail_temp / fail_time non-combustible layer failure (fall-off, crack-out, melt)
+#   offgas <gas> <mass fraction>  what the material gives off when heated (gases in
+#                         data/gases.txt). Fractions sum to 1. PROTOTYPE product
+#                         splits: Phase 4 data job replaces them with measured
+#                         pyrolysis product data per material.
 
 material gypsum_board
   name "Gypsum board (regular, Type X shares values)"
@@ -29,6 +33,7 @@ material gypsum_board
   color 0.88 0.87 0.84
   source "density/k/cp: SFPE Handbook 5th ed., thermal property appendix (verify); Gypsum Association GA-235 for board mass"
   source "fail_temp/fail_time: PROTOTYPE estimate, replaced by dehydration + fall-off model in Phase 4"
+  offgas H2O 1.0  # chemically bound water driven off as steam (~21% of board mass), dehydration only
 end
 
 material glass
@@ -63,6 +68,17 @@ material lumber_spf
   source "density/k: USDA FPL Wood Handbook FPL-GTR-282 ch.4 (verify for SPF at 12% MC)"
   source "dHc, soot yield: Tewarson, SFPE Handbook ch. 'Generation of Heat and Gaseous, Liquid and Solid Products in Fires', wood (verify)"
   source "Lg, aerosol_yield, surface_depth: PROTOTYPE estimates"
+  offgas TAR 0.50
+  offgas H2O 0.15
+  offgas CO2 0.10
+  offgas CO 0.08
+  offgas C2H4O2 0.05
+  offgas CH4 0.03
+  offgas CH3OH 0.03
+  offgas CH2O 0.02
+  offgas C2H4 0.02
+  offgas C3H4O 0.01
+  offgas H2 0.01
 end
 
 material osb
@@ -82,6 +98,17 @@ material osb
   color 0.74 0.60 0.38
   source "density/k: APA Panel Design Specification / Wood Handbook ch.11 (verify)"
   source "dHc, soot: Tewarson, SFPE Handbook (wood products, verify)"
+  offgas TAR 0.48
+  offgas H2O 0.15
+  offgas CO2 0.10
+  offgas CO 0.08
+  offgas C2H4O2 0.05
+  offgas CH4 0.03
+  offgas CH3OH 0.03
+  offgas CH2O 0.04  # resin binder adds formaldehyde
+  offgas C2H4 0.02
+  offgas C3H4O 0.01
+  offgas H2 0.01
 end
 
 material asphalt_shingle
@@ -100,6 +127,14 @@ material asphalt_shingle
   surface_depth 0.004
   color 0.25 0.24 0.24
   source "PROTOTYPE estimates pending ASTM E1354 data for asphalt shingles (Phase 6 data job)"
+  offgas TAR 0.60
+  offgas CH4 0.10
+  offgas C2H4 0.10
+  offgas C6H6 0.05
+  offgas C7H8 0.05
+  offgas CO2 0.05
+  offgas CO 0.03
+  offgas H2 0.02
 end
 
 material fiberglass
@@ -132,6 +167,14 @@ material pu_foam
   color 0.85 0.80 0.45
   source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, flexible polyurethane foams GM21-GM27 (verify)"
   source "density: typical upholstery grade 1.8 lb/ft3 (verify against NIST TN 2303 items)"
+  offgas TDI 0.25  # first stage: isocyanate, yellow smoke
+  offgas TAR 0.35
+  offgas C3H6 0.15
+  offgas CO 0.05
+  offgas CO2 0.05
+  offgas H2O 0.05
+  offgas HCN 0.02
+  offgas C6H6 0.08
 end
 
 material fabric
@@ -150,6 +193,15 @@ material fabric
   surface_depth 0.002
   color 0.35 0.42 0.62
   source "PROTOTYPE blend of Tewarson cotton and polyester values (SFPE Handbook, verify)"
+  offgas TAR 0.45
+  offgas H2O 0.15
+  offgas CO2 0.14
+  offgas CO 0.07
+  offgas C2H4O2 0.05
+  offgas C6H6 0.05
+  offgas CH4 0.03
+  offgas CH2O 0.03
+  offgas C2H4 0.03
 end
 
 material nylon_carpet
@@ -168,6 +220,15 @@ material nylon_carpet
   surface_depth 0.003
   color 0.55 0.50 0.44
   source "PROTOTYPE from Tewarson nylon values derated for backing and pad (SFPE Handbook, verify)"
+  offgas CAPRO 0.60  # nylon 6 depolymerizes to caprolactam
+  offgas CO2 0.07
+  offgas H2O 0.07
+  offgas CO 0.05
+  offgas C2H4 0.05
+  offgas C6H6 0.05
+  offgas TAR 0.05
+  offgas NH3 0.03
+  offgas HCN 0.03
 end
 
 material pvc_vinyl
@@ -186,6 +247,13 @@ material pvc_vinyl
   surface_depth 0.001
   color 0.90 0.90 0.86
   source "dHc, soot: Tewarson, SFPE Handbook, rigid PVC (verify)"
+  offgas HCl 0.55  # dehydrochlorination below ~300 C; PVC is ~57% chlorine by mass
+  offgas TAR 0.20
+  offgas C6H6 0.08
+  offgas CO2 0.05
+  offgas C2H4 0.05
+  offgas CO 0.04
+  offgas C7H8 0.03
 end
 
 material steel
@@ -215,6 +283,11 @@ material latex_paint
   surface_depth 0.0001
   color 0.85 0.83 0.78   # display default; rooms set their own paint color
   source "PROTOTYPE: dry film ~0.1 mm for two coats; acrylic binder burning values from Tewarson PMMA-class polymers, derated for pigment (verify)"
+  offgas MMA 0.50
+  offgas TAR 0.25
+  offgas CO2 0.10
+  offgas H2O 0.10
+  offgas CO 0.05
 end
 
 material polypropylene
@@ -233,4 +306,10 @@ material polypropylene
   surface_depth 0.002
   color 0.30 0.45 0.65
   source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, polypropylene (verify); density/k/cp: polymer handbook typical (verify)"
+  offgas TAR 0.60  # waxy oligomers
+  offgas C3H6 0.25
+  offgas C2H4 0.05
+  offgas CH4 0.05
+  offgas CO2 0.03
+  offgas CO 0.02
 end

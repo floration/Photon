@@ -38,3 +38,11 @@ Every value is in `data/materials.txt` next to its source line. The thermal prop
 - Gypsum dehydration and fall-off data for fire exposure.
 - Ignition source powers and durations from the SFPE Handbook and NFPA 921.
 - Furniture items checked against NIST TN 2303 and the NIST Fire Calorimetry Database.
+
+## Gases (data/gases.txt)
+
+21 species (CO, CO2, H2O, H2, CH4, C2H4, C3H6, benzene, toluene, formaldehyde, acrolein, methanol, acetic acid, HCN, HCl, NH3, TDI, methyl methacrylate, caprolactam, lumped tar). Molar mass, heat of combustion, autoignition temperature, flammability limits and IDLH come from NFPA 325, the CRC Handbook and the NIOSH Pocket Guide, all marked **verify**. The lumped tar species is **prototype**.
+
+## Material off-gas splits
+
+Each material lists what it gives off by mass fraction, for example wood (tar, steam, CO2, CO, acetic acid, methane, methanol, formaldehyde), PVC (HCl about 55%), flexible PU foam (TDI, HCN), nylon (caprolactam) and gypsum (steam from bound water). The splits are **prototype** estimates and a Phase 4 data job will replace them with measured pyrolysis product data per material.

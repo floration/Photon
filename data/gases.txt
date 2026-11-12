@@ -1,0 +1,239 @@
+photon_gases 1
+# Photon gas library: the species materials give off when heated (R10).
+# Units: SI. molar_mass g/mol, heat_of_combustion J/kg (lower heating value,
+# 0 = does not burn), autoignition K, flammability limits as volume fraction in
+# air at ambient, idlh ppm (NIOSH immediately dangerous to life or health).
+# Status: values are standard handbook values entered for Phase 2 and marked
+# "verify" until checked line by line against the cited source (see
+# docs/DATA_REGISTER.md). The Phase 1-2 solver still burns one lumped fuel gas;
+# Phase 4 transports each gas listed here separately.
+#
+# Sources used throughout:
+#   [NFPA]  NFPA 325 / Fire Protection Guide to Hazardous Materials (AIT, LFL, UFL)
+#   [CRC]   CRC Handbook of Chemistry and Physics (molar mass, heats of combustion)
+#   [NIOSH] NIOSH Pocket Guide to Chemical Hazards (IDLH)
+#   [SFPE]  SFPE Handbook of Fire Protection Engineering, combustion and toxicity chapters
+
+gas CO
+  name "Carbon monoxide"
+  formula CO
+  molar_mass 28.01
+  heat_of_combustion 10.1e6
+  autoignition 882
+  lfl 0.125
+  ufl 0.74
+  idlh 1200
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas CO2
+  name "Carbon dioxide"
+  formula CO2
+  molar_mass 44.01
+  heat_of_combustion 0
+  idlh 40000
+  source "[CRC] [NIOSH] (verify)"
+end
+
+gas H2O
+  name "Water vapor (steam)"
+  formula H2O
+  molar_mass 18.02
+  heat_of_combustion 0
+  source "[CRC]"
+end
+
+gas H2
+  name "Hydrogen"
+  formula H2
+  molar_mass 2.016
+  heat_of_combustion 120.0e6
+  autoignition 858
+  lfl 0.04
+  ufl 0.75
+  source "[CRC] [NFPA] (verify)"
+end
+
+gas CH4
+  name "Methane"
+  formula CH4
+  molar_mass 16.04
+  heat_of_combustion 50.0e6
+  autoignition 810
+  lfl 0.05
+  ufl 0.15
+  source "[CRC] [NFPA] (verify)"
+end
+
+gas C2H4
+  name "Ethylene"
+  formula C2H4
+  molar_mass 28.05
+  heat_of_combustion 47.2e6
+  autoignition 723
+  lfl 0.027
+  ufl 0.36
+  source "[CRC] [NFPA] (verify)"
+end
+
+gas C3H6
+  name "Propylene"
+  formula C3H6
+  molar_mass 42.08
+  heat_of_combustion 45.8e6
+  autoignition 728
+  lfl 0.020
+  ufl 0.111
+  source "[CRC] [NFPA] (verify)"
+end
+
+gas C6H6
+  name "Benzene"
+  formula C6H6
+  molar_mass 78.11
+  heat_of_combustion 40.1e6
+  autoignition 771
+  lfl 0.012
+  ufl 0.078
+  idlh 500
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas C7H8
+  name "Toluene"
+  formula C7H8
+  molar_mass 92.14
+  heat_of_combustion 40.9e6
+  autoignition 753
+  lfl 0.011
+  ufl 0.071
+  idlh 500
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas CH2O
+  name "Formaldehyde"
+  formula CH2O
+  molar_mass 30.03
+  heat_of_combustion 17.3e6
+  autoignition 703
+  lfl 0.07
+  ufl 0.73
+  idlh 20
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas C3H4O
+  name "Acrolein"
+  formula C3H4O
+  molar_mass 56.06
+  heat_of_combustion 27.5e6
+  autoignition 493
+  lfl 0.028
+  ufl 0.31
+  idlh 2
+  source "[NFPA] [NIOSH] (verify; heat of combustion PROTOTYPE estimate)"
+end
+
+gas CH3OH
+  name "Methanol"
+  formula CH3OH
+  molar_mass 32.04
+  heat_of_combustion 20.0e6
+  autoignition 737
+  lfl 0.06
+  ufl 0.36
+  idlh 6000
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas C2H4O2
+  name "Acetic acid"
+  formula C2H4O2
+  molar_mass 60.05
+  heat_of_combustion 13.1e6
+  autoignition 700
+  lfl 0.04
+  ufl 0.16
+  idlh 50
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas HCN
+  name "Hydrogen cyanide"
+  formula HCN
+  molar_mass 27.03
+  heat_of_combustion 24.0e6
+  autoignition 811
+  lfl 0.056
+  ufl 0.40
+  idlh 50
+  source "[NFPA] [NIOSH] (verify; heat of combustion PROTOTYPE estimate)"
+end
+
+gas HCl
+  name "Hydrogen chloride"
+  formula HCl
+  molar_mass 36.46
+  heat_of_combustion 0
+  idlh 50
+  source "[CRC] [NIOSH] (verify)"
+end
+
+gas NH3
+  name "Ammonia"
+  formula NH3
+  molar_mass 17.03
+  heat_of_combustion 18.6e6
+  autoignition 924
+  lfl 0.15
+  ufl 0.28
+  idlh 300
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas TDI
+  name "Toluene diisocyanate (vapor and aerosol)"
+  formula C9H6N2O2
+  molar_mass 174.16
+  heat_of_combustion 24.0e6
+  autoignition 893
+  lfl 0.009
+  ufl 0.095
+  idlh 2.5
+  source "[NFPA] [NIOSH] (verify; heat of combustion PROTOTYPE estimate)"
+end
+
+gas MMA
+  name "Methyl methacrylate"
+  formula C5H8O2
+  molar_mass 100.12
+  heat_of_combustion 26.0e6
+  autoignition 708
+  lfl 0.017
+  ufl 0.082
+  idlh 1000
+  source "[CRC] [NFPA] [NIOSH] (verify)"
+end
+
+gas CAPRO
+  name "Caprolactam"
+  formula C6H11NO
+  molar_mass 113.16
+  heat_of_combustion 31.0e6
+  autoignition 648
+  lfl 0.014
+  ufl 0.08
+  source "[NFPA] (verify; heat of combustion PROTOTYPE estimate)"
+end
+
+gas TAR
+  name "Pyrolysis tar / heavy organics (lumped, levoglucosan-like)"
+  formula C6H10O5
+  molar_mass 162.14
+  heat_of_combustion 17.0e6
+  autoignition 600
+  lfl 0.01
+  ufl 0.10
+  source "PROTOTYPE lumped species; Phase 4 data job splits it per material (wood: Di Blasi 2008 review of wood pyrolysis products)"
+end

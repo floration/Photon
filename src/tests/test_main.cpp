@@ -46,7 +46,7 @@ struct World {
     std::string err;
     bool ok = false;
     World() {
-        ok = lib.loadMaterials("data/materials.txt", err) && lib.loadAssemblies("data/assemblies.txt", err) &&
+        ok = lib.loadGases("data/gases.txt", err) && lib.loadMaterials("data/materials.txt", err) && lib.loadAssemblies("data/assemblies.txt", err) &&
              lib.loadComponents("data/components.txt", err) &&
              scene.load("scenes/model_home.txt", lib, err);
     }
@@ -109,6 +109,30 @@ TEST(format_versions) {
     World& w = world();
     CHECK(w.lib.component("lumber_2x4") && std::fabs(w.lib.component("lumber_2x4")->width - 3.5f * 0.0254f) < 1e-6f);
     for (const Component& c : w.lib.components) CHECK_MSG(!c.source.empty(), c.id);
+}
+
+TEST(gases_and_offgas) {
+    World& w = world();
+    CHECK(w.lib.gases.size() >= 15);
+    for (const Gas& g : w.lib.gases) {
+        CHECK_MSG(!g.source.empty() && g.molarMass > 0, g.id);
+        if (g.heatOfCombustion > 0) CHECK_MSG(g.lfl > 0 && g.ufl > g.lfl, g.id);
+    }
+    for (const Material& m : w.lib.materials) {
+        if (m.combustible) CHECK_MSG(!m.offgas.empty(), m.id);
+        float sum = 0;
+        for (const Offgas& o : m.offgas) { CHECK(o.gas >= 0); sum += o.massFraction; }
+        if (!m.offgas.empty()) CHECK_MSG(std::fabs(sum - 1) < 0.02f, m.id);
+    }
+    // PVC gives off hydrogen chloride; gypsum gives off steam
+    auto has = [&](const char* mat, const char* gas) {
+        const Material& m = w.lib.materials[w.lib.findMaterial(mat)];
+        for (const Offgas& o : m.offgas) if (w.lib.gases[o.gas].id == gas) return true;
+        return false;
+    };
+    CHECK(has("pvc_vinyl", "HCl"));
+    CHECK(has("gypsum_board", "H2O"));
+    CHECK(has("pu_foam", "HCN"));
 }
 
 TEST(assemblies_resolve) {

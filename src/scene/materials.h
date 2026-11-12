@@ -7,6 +7,21 @@
 
 namespace photon {
 
+// A gas species a material can give off (data/gases.txt).
+struct Gas {
+    std::string id, name, formula, source;
+    float molarMass = 0;            // g/mol
+    float heatOfCombustion = 0;     // J/kg, 0 = does not burn
+    float autoignition = 0;         // K, 0 = n/a
+    float lfl = 0, ufl = 0;         // volume fraction in air
+    float idlh = 0;                 // ppm, 0 = not listed
+};
+
+struct Offgas {
+    int gas = -1;
+    float massFraction = 0;         // of the material's off-gas
+};
+
 struct Material {
     std::string id, name;
     // Solid thermal properties
@@ -27,6 +42,7 @@ struct Material {
     float failTemp = 0;             // K
     float failTime = 0;             // s above failTemp before the layer is gone
     float color[3] = {0.7f, 0.7f, 0.7f};
+    std::vector<Offgas> offgas;     // what it gives off when heated, by mass fraction
     std::string source;
 };
 
@@ -51,14 +67,17 @@ struct Component {
 };
 
 // Versioned text formats: each file starts with "photon_<kind> <version>".
-constexpr int MATERIALS_VERSION = 1, ASSEMBLIES_VERSION = 1, COMPONENTS_VERSION = 1, SCENE_VERSION = 1;
+constexpr int GASES_VERSION = 1, MATERIALS_VERSION = 2, ASSEMBLIES_VERSION = 1, COMPONENTS_VERSION = 1, SCENE_VERSION = 1;
 
 struct MaterialLibrary {
+    std::vector<Gas> gases;
     std::vector<Material> materials;
     std::vector<Assembly> assemblies;
     std::vector<Component> components;
 
+    bool loadGases(const std::string& path, std::string& err);       // load before materials
     bool loadMaterials(const std::string& path, std::string& err);
+    int findGas(const std::string& id) const;
     bool loadAssemblies(const std::string& path, std::string& err);
     bool loadComponents(const std::string& path, std::string& err);
     const Component* component(const std::string& id) const;

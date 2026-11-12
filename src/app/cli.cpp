@@ -56,7 +56,7 @@ static int runJob(const std::string& jobPath) {
     }
     MaterialLibrary lib;
     Scene scene;
-    if (!lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err) ||
+    if (!lib.loadGases("data/gases.txt", err) || !lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err) ||
         !lib.loadComponents("data/components.txt", err) || !scene.load(scenePath, lib, err)) {
         status("failed: " + err, nullptr, 0);
         return 1;
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
 
     MaterialLibrary lib;
     std::string err;
-    if (!lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err) ||
+    if (!lib.loadGases("data/gases.txt", err) || !lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err) ||
         !lib.loadComponents("data/components.txt", err)) {
         std::fprintf(stderr, "data: %s\n", err.c_str());
         return 1;
