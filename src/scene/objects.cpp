@@ -783,7 +783,25 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
         const Material& m = lib.materials[r.floorMaterial];
         float t = std::max(0.002f, r.floorArealMass / m.density);
         float zb = storyBase(r.story);
-        addBoxXYZ(r.name + " floor: " + m.name, "floor covering", r.floorMaterial, r.story, r.x0, r.y0, zb, r.x1, r.y1, zb + t);
+        // flooring is cut around a stairwell opening coming up from the story below
+        struct Rc { float x0, y0, x1, y1; };
+        std::vector<Rc> pieces = {{r.x0, r.y0, r.x1, r.y1}};
+        for (const Stair& st : stairs) {
+            if (st.story != r.story - 1) continue;
+            std::vector<Rc> next;
+            for (const Rc& p : pieces) {
+                if (st.x1 <= p.x0 || st.x0 >= p.x1 || st.y1 <= p.y0 || st.y0 >= p.y1) { next.push_back(p); continue; }
+                if (st.x0 > p.x0) next.push_back({p.x0, p.y0, st.x0, p.y1});
+                if (st.x1 < p.x1) next.push_back({st.x1, p.y0, p.x1, p.y1});
+                float cx0 = std::max(p.x0, st.x0), cx1 = std::min(p.x1, st.x1);
+                if (st.y0 > p.y0) next.push_back({cx0, p.y0, cx1, st.y0});
+                if (st.y1 < p.y1) next.push_back({cx0, st.y1, cx1, p.y1});
+            }
+            pieces.swap(next);
+        }
+        for (const Rc& p : pieces)
+            if (p.x1 - p.x0 > 0.02f && p.y1 - p.y0 > 0.02f)
+                addBoxXYZ(r.name + " floor: " + m.name, "floor covering", r.floorMaterial, r.story, p.x0, p.y0, zb, p.x1, p.y1, zb + t);
     }
     for (size_t it = 0; it < items.size(); ++it)
         for (const Part& p : items[it].parts) {

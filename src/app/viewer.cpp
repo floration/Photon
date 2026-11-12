@@ -504,6 +504,7 @@ void Viewer::buildMeshes() {
             float z = zb + (st > 0 ? 0.004f : 0.0f);
             bool covered = s.porous[c] && s.fuelMat[c] >= 0 && !s.blocked[c] && s.fuelMat[c] != scene_.joistMaterial;
             if (st > 0 && !covered) continue;   // upper floors: the subfloor barrier is drawn instead
+            if (st > 0 && s.bz[s.zface(i, j, kf)] < 0) continue;   // stairwell opening
             if (covered) {
                 const Material& m = lib_.materials[s.fuelMat[c]];
                 float left = s.fuelMass0[c] > 0 ? s.fuelMass[c] / (s.fuelMass0[c] * std::max(0.01f, 1 - m.charYield)) : 0;
@@ -1097,14 +1098,15 @@ void Viewer::run() {    double last = plat_.now();
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
         if (!still_.empty()) {
             ++stillFrame_;
-            struct View { Vec3 eye, at; bool roofHidden; int stage; bool cut; } views[5] = {
+            struct View { Vec3 eye, at; bool roofHidden; int stage; bool cut; } views[6] = {
                 {Vec3(-9, -12, 11), Vec3(7, 5, 3), false, 0, false},
                 {Vec3(-6, -9, 12), Vec3(7, 4.5f, 2), true, STAGE_FRAMING, false},
                 {Vec3(-4, -7, 9), Vec3(7, 4.5f, 2), true, STAGE_ROUGH_IN, true},
                 {Vec3(1.0f, 1.0f, 1.7f), Vec3(5, 4.5f, 1.2f), true, STAGE_ROUGH_IN, true},
-                {Vec3(-9, -12, 8), Vec3(7, 5, 3), false, STAGE_EXTERIOR, false}};
+                {Vec3(-9, -12, 8), Vec3(7, 5, 3), false, STAGE_EXTERIOR, false},
+                {Vec3(5.5f, 5.6f, 4.4f), Vec3(5.5f, 1.8f, 1.2f), true, 0, false}};   // down the stairwell from upstairs
             int vi = stillFrame_ / 20;
-            if (vi >= 5) break;
+            if (vi >= 6) break;
             if (stillFrame_ % 20 == 1) { lookFrom(views[vi].eye, views[vi].at); hideRoof_ = views[vi].roofHidden; upperCut_ = views[vi].cut; buildStage_ = views[vi].stage; meshDirty_ = true; }
             if (stillFrame_ % 20 == 19) ren_.saveScreenshot(still_ + "_" + std::to_string(vi) + ".bmp", plat_.width(), plat_.height());
         }

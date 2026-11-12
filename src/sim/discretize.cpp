@@ -321,6 +321,7 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
                 float x = cx(i), y = cy(j);
                 if (x <= rm.x0 || x >= rm.x1 || y <= rm.y0 || y >= rm.y1) continue;
                 int c = cell(i, j, kFloorS[rm.story]);
+                if (rm.story > 0 && bz[zface(i, j, kFloorS[rm.story])] < 0) continue;   // stairwell opening: no floor here
                 fuelMat[c] = (int16_t)rm.floorMaterial;
                 porous[c] = 1;
                 fuelMass0[c] = rm.floorArealMass * dx * dx;
