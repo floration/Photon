@@ -494,7 +494,7 @@ void Solver::solidsStep(float dt) {
         int i, j, k;
         cellIJK(c, i, j, k);
         int gas[6], ng = 0;
-        if (blocked[c] && ng > 0) {
+        if (blocked[c]) {
             for (int d = 0; d < 6; ++d) {
                 if ((d == 0 && i == 0) || (d == 1 && i == nx - 1) || (d == 2 && j == 0) || (d == 3 && j == ny - 1) ||
                     (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
@@ -575,9 +575,12 @@ void Solver::solidsStep(float dt) {
             // thermally thick solid: everything the surface absorbs (the burning
             // part's flame included) conducts inward; Arrhenius kinetics in each
             // node decide how fast it gasifies
-            float qAll = (Qs + std::max(0.0f, Pburn) * dt) / (std::max(area, 1e-4f) * dt);
-            Ts = conductSlab(c, m, qAll, dt);
-            if (m.combustible && fuelMass[c] > 0) slabDm = pyrolyzeSlab(c, m, area, dt);
+            // the unburned surface heats through the slab (thermal inertia sets
+            // ignition and spread); kinetics gasify it as it heats. The flaming
+            // patch gasifies directly with the heat it receives (below).
+            float aU = std::max((1.0f - bf) * area, 1e-4f);
+            Ts = conductSlab(c, m, bf < 0.999f ? Qs / (aU * dt) : 0.0f, dt);
+            if (m.combustible && fuelMass[c] > 0) slabDm = pyrolyzeSlab(c, m, (1.0f - bf) * area, dt);
         } else {
             Ts += Qs / C;
         }
@@ -616,9 +619,9 @@ void Solver::solidsStep(float dt) {
         }
         {
             static int dbg = std::getenv("PHOTON_DEBUG_CELL") ? std::atoi(std::getenv("PHOTON_DEBUG_CELL")) : -1;
-            if (c == dbg) std::fprintf(stderr, "t=%.2f c=%d Ts=%.0f bf=%.4f ignE=%.0f touch=%.0f Pburn=%.1f hrr=%.0f pilot=%d Tg=%.0f fuel=%.4f\n", time, c, Ts, burnFrac[c], ignE[c], flameTouch, Pburn, hrr[c], pilot[c], T[c], fuelMass[c]);
+            if (c == dbg) std::fprintf(stderr, "t=%.2f c=%d Ts=%.0f bf=%.4f ignE=%.0f touch=%.0f Pburn=%.1f hrr=%.0f pilot=%d Tg=%.0f fuel=%.4f ng=%d g0=%d g1=%d pil0=%d hrr0=%.0f mat=%s\n", time, c, Ts, burnFrac[c], ignE[c], flameTouch, Pburn, hrr[c], pilot[c], T[c], fuelMass[c], ng, ng > 0 ? gas[0] : -1, ng > 1 ? gas[1] : -1, ng > 0 ? pilot[gas[0]] : -1, ng > 0 ? hrr[gas[0]] : 0.0f, m.id.c_str(), (int)blocked[c], (int)porous[c], (int)itemOf[c]);
         }
-        float gasified = blocked[c] ? slabDm : (bf > 0 && Pburn > 0 ? Pburn * dt / m.heatOfGasification : 0.0f);
+        float gasified = slabDm + (bf > 0 && Pburn > 0 ? Pburn * dt / m.heatOfGasification : 0.0f);
         if (m.combustible && fuelMass[c] > 0 && gasified > 0 && ng > 0) {
             float dm = std::min(fuelMass[c], gasified);
             fuelMass[c] -= dm;
