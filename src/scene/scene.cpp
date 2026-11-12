@@ -1,0 +1,292 @@
+#include "scene/scene.h"
+#include "scene/textfile.h"
+#include <algorithm>
+#include <cmath>
+
+namespace photon {
+
+namespace {
+// Actual dressed size of nominal 2x lumber, dry: American Softwood Lumber
+// Standard, NIST Voluntary Product Standard PS 20 (2x4 = 1-1/2 x 3-1/2 in,
+// 2x8 = 1-1/2 x 7-1/4 in). See docs/DATA_REGISTER.md.
+constexpr float IN = 0.0254f;
+constexpr float T2X = 1.5f * IN;        // 2x thickness
+constexpr float D2X4 = 3.5f * IN;
+constexpr float D2X8 = 7.25f * IN;
+// Metal connector plate for wood trusses: 20 gauge galvanized steel is the
+// common minimum (ANSI/TPI 1); 0.036 in nominal. To verify, see register.
+constexpr float GUSSET_T = 0.036f * IN;
+
+std::string where(const TextFile& f, const TextLine& l) { return f.path + ":" + std::to_string(l.number) + ": "; }
+} // namespace
+
+const Room* Scene::roomAt(float x, float y) const {
+    for (const Room& r : rooms)
+        if (x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1) return &r;
+    return nullptr;
+}
+
+bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::string& err) {
+    TextFile f;
+    if (!f.load(path, err)) return false;
+    float unit = 1.0f;  // meters per scene unit
+    Item* item = nullptr;
+    bool header = false;
+    for (const TextLine& l : f.lines) {
+        const auto& t = l.tok;
+        const std::string& k = t[0];
+        auto num = [&](size_t i, float& out, bool scale = true) -> bool {
+            if (t.size() <= i) { err = where(f, l) + "missing value for '" + k + "'"; return false; }
+            bool ok;
+            out = (float)toNumber(t[i], ok);
+            if (!ok) { err = where(f, l) + "bad number '" + t[i] + "'"; return false; }
+            if (scale) out *= unit;
+            return true;
+        };
+        auto mat = [&](size_t i, int& out) -> bool {
+            if (t.size() <= i) { err = where(f, l) + "missing material"; return false; }
+            out = lib.findMaterial(t[i]);
+            if (out < 0) { err = where(f, l) + "unknown material '" + t[i] + "'"; return false; }
+            return true;
+        };
+        auto asmb = [&](size_t i, int& out) -> bool {
+            if (t.size() <= i) { err = where(f, l) + "missing assembly"; return false; }
+            out = lib.findAssembly(t[i]);
+            if (out < 0) { err = where(f, l) + "unknown assembly '" + t[i] + "'"; return false; }
+            return true;
+        };
+        if (k == "photon_scene") { header = true; continue; }
+        if (!header) { err = where(f, l) + "file must start with 'photon_scene <version>'"; return false; }
+
+        if (item) {
+            if (k == "end") { item = nullptr; continue; }
+            if (k != "part") { err = where(f, l) + "only 'part' lines inside an item"; return false; }
+            // part <material> <mass_kg> x0 y0 z0 x1 y1 z1
+            Part p;
+            if (!mat(1, p.material) || !num(2, p.mass, false)) return false;
+            float b[6];
+            for (int i = 0; i < 6; ++i) if (!num(3 + i, b[i])) return false;
+            p.box = {std::min(b[0], b[3]), std::min(b[1], b[4]), std::min(b[2], b[5]),
+                     std::max(b[0], b[3]), std::max(b[1], b[4]), std::max(b[2], b[5])};
+            item->parts.push_back(p);
+            continue;
+        }
+
+        if (k == "units") {
+            if (t.size() < 2) { err = where(f, l) + "units ft|m"; return false; }
+            if (t[1] == "ft") unit = 0.3048f;
+            else if (t[1] == "m") unit = 1.0f;
+            else { err = where(f, l) + "unknown unit '" + t[1] + "'"; return false; }
+        } else if (k == "name") {
+            name = t.size() > 1 ? t[1] : "";
+        } else if (k == "footprint") {
+            if (!num(1, width) || !num(2, depth)) return false;
+        } else if (k == "ceiling_height") {
+            if (!num(1, ceilingHeight)) return false;
+        } else if (k == "roof_pitch") {
+            float rise, run;
+            if (!num(1, rise, false) || !num(2, run, false)) return false;
+            pitch = rise / run;
+        } else if (k == "eave_overhang") {
+            if (!num(1, eaveOverhang)) return false;
+        } else if (k == "truss_spacing") {
+            if (!num(1, trussSpacing)) return false;
+        } else if (k == "stud_spacing") {
+            if (!num(1, studSpacing)) return false;
+        } else if (k == "attic_vent_ratio") {
+            if (!num(1, atticVentRatio, false)) return false;
+        } else if (k == "assembly_ext_wall") { if (!asmb(1, extWall)) return false; }
+        else if (k == "assembly_ceiling") { if (!asmb(1, ceiling)) return false; }
+        else if (k == "assembly_roof") { if (!asmb(1, roof)) return false; }
+        else if (k == "assembly_soffit") { if (!asmb(1, soffit)) return false; }
+        else if (k == "assembly_gable") { if (!asmb(1, gable)) return false; }
+        else if (k == "assembly_fascia") { if (!asmb(1, fascia)) return false; }
+        else if (k == "stud_material") { if (!mat(1, studMaterial)) return false; }
+        else if (k == "truss_material") { if (!mat(1, trussMaterial)) return false; }
+        else if (k == "gusset_material") { if (!mat(1, gussetMaterial)) return false; }
+        else if (k == "room") {
+            // room "<name>" x0 y0 x1 y1 [floor <material> <areal_kg_m2>]
+            Room r;
+            r.name = t.size() > 1 ? t[1] : "";
+            if (!num(2, r.x0) || !num(3, r.y0) || !num(4, r.x1) || !num(5, r.y1)) return false;
+            if (t.size() > 6 && t[6] == "floor") {
+                if (!mat(7, r.floorMaterial) || !num(8, r.floorArealMass, false)) return false;
+            }
+            rooms.push_back(r);
+        } else if (k == "wall") {
+            Wall w;
+            if (!asmb(1, w.assembly) || !num(2, w.x0) || !num(3, w.y0) || !num(4, w.x1) || !num(5, w.y1)) return false;
+            if (w.x0 != w.x1 && w.y0 != w.y1) { err = where(f, l) + "walls must be axis-aligned"; return false; }
+            walls.push_back(w);
+        } else if (k == "door" || k == "window" || k == "cased") {
+            // door <assembly> "<name>" x0 y0 x1 y1 open|closed
+            // window <assembly> "<name>" x0 y0 x1 y1 sill <h> head <h>
+            // cased "<name>" x0 y0 x1 y1 [head <h>]
+            Opening o;
+            size_t i = 1;
+            if (k == "cased") o.kind = OpeningKind::Cased;
+            else {
+                o.kind = k == "door" ? OpeningKind::Door : OpeningKind::Window;
+                if (!asmb(i, o.assembly)) return false;
+                ++i;
+            }
+            o.name = t.size() > i ? t[i] : "";
+            ++i;
+            if (!num(i, o.x0) || !num(i + 1, o.y0) || !num(i + 2, o.x1) || !num(i + 3, o.y1)) return false;
+            i += 4;
+            o.head = (o.kind == OpeningKind::Cased) ? ceilingHeight : 80 * IN;  // 6'8" standard door height
+            for (; i < t.size(); ++i) {
+                if (t[i] == "open") o.open = true;
+                else if (t[i] == "closed") o.open = false;
+                else if (t[i] == "sill") { if (!num(++i, o.sill)) return false; }
+                else if (t[i] == "head") { if (!num(++i, o.head)) return false; }
+                else { err = where(f, l) + "unknown option '" + t[i] + "'"; return false; }
+            }
+            if (o.kind == OpeningKind::Cased) o.open = true;
+            openings.push_back(o);
+        } else if (k == "item") {
+            items.push_back(Item{});
+            item = &items.back();
+            item->name = t.size() > 1 ? t[1] : "";
+        } else {
+            err = where(f, l) + "unknown key '" + k + "'";
+            return false;
+        }
+    }
+    if (item) { err = path + ": item '" + item->name + "' missing 'end'"; return false; }
+    if (extWall < 0 || ceiling < 0 || roof < 0 || soffit < 0 || gable < 0 || fascia < 0) {
+        err = path + ": scene must name assemblies for ext_wall, ceiling, roof, soffit, gable, fascia";
+        return false;
+    }
+    if (studMaterial < 0 || trussMaterial < 0 || gussetMaterial < 0) {
+        err = path + ": scene must name stud_material, truss_material and gusset_material";
+        return false;
+    }
+    // Exterior walls follow the footprint.
+    walls.push_back({extWall, 0, 0, width, 0, true});
+    walls.push_back({extWall, width, 0, width, depth, true});
+    walls.push_back({extWall, width, depth, 0, depth, true});
+    walls.push_back({extWall, 0, depth, 0, 0, true});
+    generateFraming(lib);
+    return true;
+}
+
+void Scene::generateFraming(const MaterialLibrary& lib) {
+    members.clear();
+    auto add = [&](MemberKind kind, int m, float ax, float ay, float az, float bx, float by, float bz,
+                   float sx, float sy, float sz, float w, float d) {
+        Member mb;
+        mb.kind = kind;
+        mb.material = m;
+        mb.p0[0] = ax; mb.p0[1] = ay; mb.p0[2] = az;
+        mb.p1[0] = bx; mb.p1[1] = by; mb.p1[2] = bz;
+        mb.side[0] = sx; mb.side[1] = sy; mb.side[2] = sz;
+        mb.width = w;
+        mb.depth = d;
+        members.push_back(mb);
+    };
+    const float H = ceilingHeight;
+    // ---- walls: single bottom plate, double top plate, studs at spacing,
+    // king studs and doubled 2x8 headers at openings.
+    for (const Wall& w : walls) {
+        bool alongX = w.y0 == w.y1;
+        float a = alongX ? std::min(w.x0, w.x1) : std::min(w.y0, w.y1);
+        float b = alongX ? std::max(w.x0, w.x1) : std::max(w.y0, w.y1);
+        float c = alongX ? w.y0 : w.x0;
+        // Pull exterior wall framing inward so it sits inside the footprint.
+        if (w.exterior) {
+            float half = D2X4 * 0.5f + 0.5f * IN;  // stud depth + gypsum, roughly centered
+            if (c <= 0.0f) c += half; else c -= half;
+        }
+        auto P = [&](float s, float z, float out[3]) {
+            if (alongX) { out[0] = s; out[1] = c; } else { out[0] = c; out[1] = s; }
+            out[2] = z;
+        };
+        float sx = alongX ? 1.f : 0.f, sy = alongX ? 0.f : 1.f;
+        float p0[3], p1[3];
+        // plates (width vertical, depth across the wall)
+        float zs[3] = {T2X * 0.5f, H - T2X * 1.5f, H - T2X * 0.5f};
+        for (float z : zs) {
+            P(a, z, p0); P(b, z, p1);
+            add(MemberKind::Plate, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0, 0, 1, T2X, D2X4);
+        }
+        // openings on this wall line
+        std::vector<const Opening*> ops;
+        for (const Opening& o : openings) {
+            bool oX = o.y0 == o.y1;
+            if (oX != alongX) continue;
+            float oc = oX ? o.y0 : o.x0;
+            if (std::fabs(oc - (alongX ? w.y0 : w.x0)) > 0.01f) continue;
+            float oa = oX ? std::min(o.x0, o.x1) : std::min(o.y0, o.y1);
+            float ob = oX ? std::max(o.x0, o.x1) : std::max(o.y0, o.y1);
+            if (ob <= a || oa >= b) continue;
+            ops.push_back(&o);
+        }
+        auto inOpening = [&](float s) {
+            for (const Opening* o : ops) {
+                float oa = alongX ? std::min(o->x0, o->x1) : std::min(o->y0, o->y1);
+                float ob = alongX ? std::max(o->x0, o->x1) : std::max(o->y0, o->y1);
+                if (s > oa - T2X && s < ob + T2X) return true;
+            }
+            return false;
+        };
+        float zb = T2X, zt = H - 2 * T2X;
+        std::vector<float> studs;
+        for (float s = a + T2X * 0.5f; s < b - T2X * 0.5f; s += studSpacing) studs.push_back(s);
+        studs.push_back(b - T2X * 0.5f);
+        for (float s : studs) {
+            if (inOpening(s)) continue;
+            P(s, zb, p0); P(s, zt, p1);
+            add(MemberKind::Stud, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], sx, sy, 0, T2X, D2X4);
+        }
+        for (const Opening* o : ops) {
+            float oa = alongX ? std::min(o->x0, o->x1) : std::min(o->y0, o->y1);
+            float ob = alongX ? std::max(o->x0, o->x1) : std::max(o->y0, o->y1);
+            for (float s : {oa - T2X * 0.5f, ob + T2X * 0.5f}) {   // king studs
+                P(s, zb, p0); P(s, zt, p1);
+                add(MemberKind::Stud, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], sx, sy, 0, T2X, D2X4);
+            }
+            if (o->kind != OpeningKind::Cased || o->head < H - 0.1f) {  // header (width vertical = 7.25")
+                P(oa - T2X, o->head + D2X8 * 0.5f, p0); P(ob + T2X, o->head + D2X8 * 0.5f, p1);
+                add(MemberKind::Header, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0, 0, 1, D2X8, D2X4);
+            }
+            if (o->kind == OpeningKind::Window) {  // rough sill
+                P(oa, o->sill - T2X * 0.5f, p0); P(ob, o->sill - T2X * 0.5f, p1);
+                add(MemberKind::Plate, studMaterial, p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0, 0, 1, T2X, D2X4);
+            }
+        }
+    }
+    // ---- prefab Fink trusses spanning y, spaced along x.
+    const float D = depth, oh = eaveOverhang, hc = D2X4 * 0.5f;
+    const float cosT = 1.0f / std::sqrt(1 + pitch * pitch);
+    auto topZ = [&](float y) {  // centerline of the top chord
+        float run = y <= D * 0.5f ? y : D - y;
+        return H + pitch * run + hc / cosT;
+    };
+    std::vector<float> xs;
+    for (float x = T2X * 0.5f; x < width - T2X * 0.5f; x += trussSpacing) xs.push_back(x);
+    xs.push_back(width - T2X * 0.5f);
+    for (float x : xs) {
+        float zb = H + hc;
+        add(MemberKind::TrussChord, trussMaterial, x, 0, zb, x, D, zb, 1, 0, 0, T2X, D2X4);
+        add(MemberKind::TrussChord, trussMaterial, x, -oh, topZ(0) - pitch * oh, x, D * 0.5f, topZ(D * 0.5f), 1, 0, 0, T2X, D2X4);
+        add(MemberKind::TrussChord, trussMaterial, x, D + oh, topZ(D) - pitch * oh, x, D * 0.5f, topZ(D * 0.5f), 1, 0, 0, T2X, D2X4);
+        float yb[2] = {D / 3, 2 * D / 3}, yt[2] = {D / 4, 3 * D / 4};
+        add(MemberKind::TrussWeb, trussMaterial, x, yb[0], zb, x, yt[0], topZ(yt[0]) - hc, 1, 0, 0, T2X, D2X4);
+        add(MemberKind::TrussWeb, trussMaterial, x, yb[0], zb, x, D * 0.5f, topZ(D * 0.5f) - hc, 1, 0, 0, T2X, D2X4);
+        add(MemberKind::TrussWeb, trussMaterial, x, yb[1], zb, x, D * 0.5f, topZ(D * 0.5f) - hc, 1, 0, 0, T2X, D2X4);
+        add(MemberKind::TrussWeb, trussMaterial, x, yb[1], zb, x, yt[1], topZ(yt[1]) - hc, 1, 0, 0, T2X, D2X4);
+        // Gusset plates on both faces at heels, ridge and panel points.
+        float joints[7][2] = {{0, H + hc}, {D, H + hc}, {D * 0.5f, topZ(D * 0.5f)}, {yb[0], zb}, {yb[1], zb},
+                              {yt[0], topZ(yt[0])}, {yt[1], topZ(yt[1])}};
+        for (auto& j : joints)
+            for (float sgn : {-1.f, 1.f}) {
+                float gx = x + sgn * (T2X * 0.5f + GUSSET_T * 0.5f);
+                add(MemberKind::Gusset, gussetMaterial, gx, j[0], j[1] - 0.075f, gx, j[0], j[1] + 0.075f, 1, 0, 0,
+                    GUSSET_T, 0.10f);
+            }
+    }
+    (void)lib;
+}
+
+} // namespace photon

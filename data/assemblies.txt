@@ -1,0 +1,88 @@
+# Photon layered assemblies - Phase 1 component set for the model home.
+#
+#   layer <material> <thickness_m> [fill <volume fraction>] [r <m2K/W>]
+# Layers run from the "inside" face to the "outside" face:
+#   walls/doors/windows: room -> exterior (interior walls: either side)
+#   ceiling: room below -> attic above;  roof/gable: attic -> exterior
+#   soffit: eave space -> exterior
+# Sizes are actual modern standard sizes. Sources and verification status are
+# in docs/DATA_REGISTER.md. Imperial sizes given in comments.
+
+assembly ext_wall_2x4
+  name "Exterior wall: 1/2 in gypsum, 2x4 @ 16 in o.c. with R-13 batt, 7/16 in OSB, vinyl siding"
+  layer gypsum_board 0.0127                    # 1/2 in
+  layer lumber_spf 0.0889 fill 0.094 r 2.29    # 2x4 (3-1/2 in deep) studs, 1-1/2 in every 16 in; R-13 batt
+  layer osb 0.0111                             # 7/16 in wall sheathing
+  layer pvc_vinyl 0.0011                       # 0.044 in vinyl siding
+  leakage 0.0003
+  source "Stud size: PS 20; spacing IRC R602.3(5); gypsum IRC R702.3.5; OSB IRC R602.3(3); R-13: IRC N1102.1.2 (verify)"
+end
+
+assembly int_wall_2x4
+  name "Interior partition: 1/2 in gypsum both sides of 2x4 @ 16 in o.c."
+  layer gypsum_board 0.0127
+  layer lumber_spf 0.0889 fill 0.094 r 0.17    # empty stud cavity (air space)
+  layer gypsum_board 0.0127
+  leakage 0.0
+  source "PS 20; IRC R602.3(5); IRC R702.3.5 (verify)"
+end
+
+assembly ceiling_r38
+  name "Ceiling: 1/2 in sag-resistant gypsum on truss bottom chords, R-38 blown fiberglass above"
+  layer gypsum_board 0.0127                    # 1/2 in ceiling board on 24 in o.c. framing
+  layer fiberglass 0.33 r 6.69                 # R-38 (~13 in blown)
+  leakage 0.0002
+  source "IRC Table R702.3.5 (1/2 in sag-resistant at 24 in o.c.); R-38: IRC N1102.1.2 climate zones 2-3 (verify)"
+end
+
+assembly roof_osb_shingle
+  name "Roof: 7/16 in OSB deck, asphalt architectural shingles"
+  layer osb 0.0111                             # 7/16 in roof sheathing on 24 in trusses
+  layer asphalt_shingle 0.0105                 # ~ 2.5-3 lb/ft2 installed (laminated shingles)
+  leakage 0.0
+  source "IRC R803.2 / Table R503.2.1.1(1) span rating 24/16 (verify); shingle mass: ASTM D3462 product data (verify)"
+end
+
+assembly soffit_vinyl_vented
+  name "Vented vinyl soffit"
+  layer pvc_vinyl 0.0011
+  leakage 0.0                                  # vent open area set from attic_vent_ratio by the discretizer
+  source "Vent area: IRC R806.2 (1/150 of attic floor area, or 1/300 with balanced high/low venting)"
+end
+
+assembly gable_wall
+  name "Gable end above top plate: 7/16 in OSB, vinyl siding (attic side unfinished)"
+  layer osb 0.0111
+  layer pvc_vinyl 0.0011
+  leakage 0.0003
+  source "IRC R602.3(3) (verify)"
+end
+
+assembly fascia_wood
+  name "Fascia: 1x6 board (3/4 in actual)"
+  layer lumber_spf 0.019
+  leakage 0.0
+  source "PS 20 board actual size 3/4 in (verify)"
+end
+
+assembly int_door_hollow
+  name "Interior door, hollow core, 1-3/8 in, hardboard skins"
+  layer osb 0.0349 fill 0.28 r 0.30            # ~ 22 lb for a 32 x 80 in slab
+  leakage 0.01                                 # 3/4 in undercut
+  source "Door size: 1-3/8 in x 6 ft 8 in standard (WDMA I.S.1A, verify); mass PROTOTYPE estimate"
+end
+
+assembly ext_door_solid
+  name "Exterior door, 1-3/4 in solid wood"
+  layer lumber_spf 0.0445
+  leakage 0.002
+  source "1-3/4 in exterior door thickness (WDMA I.S.1A, verify)"
+end
+
+assembly window_double
+  name "Double-pane insulated window, 2 x 3 mm glass"
+  layer glass 0.003
+  layer glass 0.003 r 0.17                     # includes the 1/2 in sealed air gap
+  leakage 0.0005
+  source "Glass thickness typical residential IGU (verify, ASTM E1300); U ~ 0.48 Btu/h ft2 F"
+end

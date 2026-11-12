@@ -1,0 +1,174 @@
+photon_scene 1
+# Phase 1 hand-built model home.
+# Modern single-story ranch, 50 x 30 ft (1,500 sq ft), 2 bed / 1 bath, slab on
+# grade, 8 ft ceilings, 2x4 stick framing at 16 in o.c., prefab Fink trusses at
+# 24 in o.c., vented attic, double-pane windows.
+#
+# Coordinates: feet, origin at the south-west exterior corner at slab level,
+# x east (50 ft side), y north (30 ft side), z up from the slab.
+# Front of the house faces south (y = 0).
+
+name "Phase 1 model home - 2 bed 1 bath ranch"
+units ft
+
+footprint 50 30
+ceiling_height 8
+roof_pitch 6 12
+eave_overhang 1.333          # 16 in
+truss_spacing 2              # 24 in o.c.
+stud_spacing 1.333           # 16 in o.c.
+attic_vent_ratio 150         # IRC R806.2: 1 sq ft NFA per 150 sq ft, half low / half high
+
+assembly_ext_wall ext_wall_2x4
+assembly_ceiling ceiling_r38
+assembly_roof roof_osb_shingle
+assembly_soffit soffit_vinyl_vented
+assembly_gable gable_wall
+assembly_fascia fascia_wood
+stud_material lumber_spf
+truss_material lumber_spf
+gusset_material steel
+
+# ---- rooms ------------------------------------------------------------------
+#    name           x0  y0  x1  y1        floor covering  kg/m2
+room "Living"        0   0  20  17  floor nylon_carpet  2.4
+room "Kitchen"       0  17  20  30  floor pvc_vinyl     2.8
+room "Dining"       20   0  34  13  floor nylon_carpet  2.4
+room "Hall"         20  13  50  17  floor nylon_carpet  2.4
+room "Bath"         20  17  28  30  floor pvc_vinyl     2.8
+room "Laundry"      28  17  33  30  floor pvc_vinyl     2.8
+room "Bedroom 1"    33  17  50  30  floor nylon_carpet  2.4
+room "Bedroom 2"    34   0  50  13  floor nylon_carpet  2.4
+
+# ---- interior walls (centerlines) ---------------------------------------------
+wall int_wall_2x4   0 17  20 17      # living | kitchen
+wall int_wall_2x4  20 17  20 30      # kitchen | bath
+wall int_wall_2x4  20 17  50 17      # hall north side
+wall int_wall_2x4  28 17  28 30      # bath | laundry
+wall int_wall_2x4  33 17  33 30      # laundry | bedroom 1
+wall int_wall_2x4  34  0  34 13      # dining | bedroom 2
+wall int_wall_2x4  34 13  50 13      # hall south side
+
+# ---- openings -----------------------------------------------------------------
+cased "Kitchen opening"                       4 17  16 17   head 7
+door int_door_hollow "Bath door"             23 17  25.667 17  open
+door int_door_hollow "Laundry door"          29.5 17  32.167 17  closed
+door int_door_hollow "Bedroom 1 door"        35 17  37.667 17  open
+door int_door_hollow "Bedroom 2 door"        40 13  42.667 13  closed
+door ext_door_solid  "Front door"             8  0  11 0  closed
+door ext_door_solid  "Back door"             14 30  17 30  closed
+
+window window_double "Living south window"   14  0  18  0  sill 3   head 6.667
+window window_double "Living west window"     0  6   0 10  sill 3   head 6.667
+window window_double "Kitchen north window"   5 30   9 30  sill 3.5 head 6.667
+window window_double "Kitchen west window"    0 22   0 25  sill 3.5 head 6.667
+window window_double "Dining south window"   24  0  28  0  sill 3   head 6.667
+window window_double "Bedroom 2 south window" 40 0  44  0  sill 3   head 6.667
+window window_double "Bedroom 2 east window" 50  4  50  8  sill 3   head 6.667
+window window_double "Bedroom 1 north window" 40 30 44 30  sill 3   head 6.667
+window window_double "Bedroom 1 east window" 50 21  50 25  sill 3   head 6.667
+window window_double "Bath window"           23 30  25 30  sill 4.5 head 6.667
+
+# ---- contents -----------------------------------------------------------------
+# part <material> <mass kg> x0 y0 z0  x1 y1 z1   (feet)
+# Masses are PROTOTYPE estimates for typical modern furniture; Phase 6 replaces
+# them with catalog items checked against NIST TN 2303 / Fire Calorimetry DB.
+
+item "Sofa"
+  part lumber_spf 18   0.5 1 0.0   3.5 8 1.0     # frame and base
+  part pu_foam     7   1.2 1 1.0   3.5 8 1.6     # seat cushions
+  part pu_foam     4   0.5 1 1.0   1.2 8 2.8     # back cushions
+  part fabric      5   1.2 1 1.6   3.5 8 1.9     # cover
+end
+item "Armchair"
+  part lumber_spf  8   15 12 0.0   18 15 1.0
+  part pu_foam     3   15 12 1.0   18 14.3 1.6
+  part pu_foam     2   15 14.3 1.0 18 15 2.8
+  part fabric      2   15 12 1.6   18 14.3 1.9
+end
+item "Coffee table"
+  part lumber_spf 15   5 3 1.3   8 6 1.5
+end
+item "TV stand"
+  part osb 30          6 0.5 0   12 2 2
+end
+
+item "Kitchen base cabinets"
+  part osb 70          0.5 27.5 0   10 29.6 3.15
+end
+item "Range"
+  part steel 60        10 27.5 0   12.5 29.6 3
+end
+item "Upper cabinets west"
+  part osb 25          0.5 28.6 4.5   4.5 29.6 7
+end
+item "Upper cabinets east"
+  part osb 25          9.5 28.6 4.5   13 29.6 7
+end
+item "Refrigerator"
+  part steel 90        13.5 27 0   16.5 29.6 5.8
+end
+item "Kitchen table"
+  part lumber_spf 25   6 20 2.3   10 23.5 2.5
+end
+item "Kitchen chairs"
+  part lumber_spf 5    4.5 20.5 1.4   5.8 22 1.6
+  part lumber_spf 5    10.2 20.5 1.4  11.5 22 1.6
+  part lumber_spf 5    6.5 18.6 1.4   8 19.8 1.6
+  part lumber_spf 5    6.5 23.8 1.4   8 25 1.6
+end
+
+item "Dining table"
+  part lumber_spf 35   24 4 2.3   30 8 2.5
+end
+item "Dining chairs"
+  part lumber_spf 5    22.5 5 1.4   23.8 6.5 1.6
+  part lumber_spf 5    30.2 5 1.4   31.5 6.5 1.6
+  part lumber_spf 5    26 2.5 1.4   27.5 3.8 1.6
+  part lumber_spf 5    26 8.2 1.4   27.5 9.5 1.6
+end
+item "Sideboard"
+  part osb 40          31.5 3 0   33.6 9 3
+end
+
+item "Bedroom 2 bed"
+  part lumber_spf 25   43.3 3 0.0   49.6 8 1.0
+  part pu_foam    15   43.3 3 1.0   49.6 8 1.9
+  part fabric      6   43.3 3 1.9   49.6 8 2.2
+end
+item "Bedroom 2 dresser"
+  part osb 45          34.5 11 0   39.5 12.6 3
+end
+item "Bedroom 2 nightstand"
+  part osb 10          42 8.5 0   43.3 10 2
+end
+
+item "Bedroom 1 bed"
+  part lumber_spf 25   39 23.3 0.0   44 29.6 1.0
+  part pu_foam    15   39 23.3 1.0   44 29.6 1.9
+  part fabric      6   39 23.3 1.9   44 29.6 2.2
+end
+item "Bedroom 1 dresser"
+  part osb 45          45.5 17.4 0   49.6 19 3
+end
+item "Bedroom 1 nightstands"
+  part osb 10          37.4 28 0   39 29.6 2
+  part osb 10          44 28 0   45.6 29.6 2
+end
+item "Bedroom 1 closet clothing"
+  part fabric 25       33.4 20 1   35 27 6
+end
+
+item "Bath vanity"
+  part osb 20          20.4 28.3 0   23 29.6 2.8
+end
+item "Bathtub"
+  part steel 50        23.5 27.4 0   27.6 29.6 1.5
+end
+
+item "Washer"
+  part steel 70        28.4 27.3 0   30.6 29.6 3
+end
+item "Dryer"
+  part steel 55        30.7 27.3 0   32.7 29.6 3
+end

@@ -1,0 +1,5 @@
+build/
+build-*/
+*.bmp
+.vscode/
+.idea/

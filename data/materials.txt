@@ -1,0 +1,199 @@
+﻿# Photon material library - Phase 1 prototype set.
+#
+# Units: SI. Temperatures in kelvin.
+# PROTOTYPE DATA: values are typical literature values used to get a running
+# prototype. Each carries its source; status for every value is tracked in
+# docs/DATA_REGISTER.md. Values marked "verify" must be checked against the
+# primary source before Phase 4 replaces the prototype burning model.
+#
+# Burning keys (prototype model, see docs/PROTOTYPE_PHYSICS.md):
+#   pyrolysis_temp        surface temperature where off-gassing begins
+#   heat_of_gasification  energy to turn 1 kg of solid into off-gas
+#   heat_of_combustion    effective heat released per kg of off-gas burned
+#   soot_yield            kg soot per kg burned (well-ventilated)
+#   aerosol_yield         kg light-colored pyrolysis aerosol per kg off-gassed
+#   char_yield            kg char / inert residue left per kg of solid
+#   surface_depth         thickness of the heated surface node (prototype lumping)
+#   fail_temp / fail_time non-combustible layer failure (fall-off, crack-out, melt)
+
+material gypsum_board
+  name "Gypsum board (regular, Type X shares values)"
+  density 640            # 1/2 in board ~1.6-1.8 lb/ft2 -> ~ 640-700 kg/m3
+  conductivity 0.17
+  specific_heat 1090
+  emissivity 0.9
+  combustible no
+  fail_temp 923          # prototype: calcined through and falling off at ~650 C
+  fail_time 60
+  color 0.88 0.87 0.84
+  source "density/k/cp: SFPE Handbook 5th ed., thermal property appendix (verify); Gypsum Association GA-235 for board mass"
+  source "fail_temp/fail_time: PROTOTYPE estimate, replaced by dehydration + fall-off model in Phase 4"
+end
+
+material glass
+  name "Soda-lime float glass"
+  density 2500
+  conductivity 1.0
+  specific_heat 840
+  emissivity 0.9
+  combustible no
+  fail_temp 573          # prototype fall-out criterion (~300 C pane temperature)
+  fail_time 5
+  color 0.55 0.70 0.80
+  source "properties: Incropera & DeWitt, Fundamentals of Heat and Mass Transfer, Table A.3 (verify)"
+  source "fail_temp: PROTOTYPE; Phase 5 replaces with thermal-stress cracking (Pagni/Joshi, Keski-Rahkonen)"
+end
+
+material lumber_spf
+  name "Framing lumber, spruce-pine-fir, kiln dried"
+  density 450
+  conductivity 0.12
+  specific_heat 1300
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 600
+  heat_of_gasification 1.8e6
+  heat_of_combustion 12.4e6
+  soot_yield 0.015
+  aerosol_yield 0.03
+  char_yield 0.25
+  surface_depth 0.003
+  color 0.80 0.65 0.42
+  source "density/k: USDA FPL Wood Handbook FPL-GTR-282 ch.4 (verify for SPF at 12% MC)"
+  source "dHc, soot yield: Tewarson, SFPE Handbook ch. 'Generation of Heat and Gaseous, Liquid and Solid Products in Fires', wood (verify)"
+  source "Lg, aerosol_yield, surface_depth: PROTOTYPE estimates"
+end
+
+material osb
+  name "Oriented strand board / particleboard (also used for case goods)"
+  density 620
+  conductivity 0.13
+  specific_heat 1300
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 600
+  heat_of_gasification 2.0e6
+  heat_of_combustion 13.0e6
+  soot_yield 0.015
+  aerosol_yield 0.03
+  char_yield 0.25
+  surface_depth 0.003
+  color 0.74 0.60 0.38
+  source "density/k: APA Panel Design Specification / Wood Handbook ch.11 (verify)"
+  source "dHc, soot: Tewarson, SFPE Handbook (wood products, verify)"
+end
+
+material asphalt_shingle
+  name "Asphalt shingle, fiberglass mat with mineral granules"
+  density 1200
+  conductivity 0.2
+  specific_heat 1500
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 620
+  heat_of_gasification 2.0e6
+  heat_of_combustion 12.0e6     # per kg of whole shingle off-gassed (asphalt only burns)
+  soot_yield 0.08
+  aerosol_yield 0.03
+  char_yield 0.60               # granules + glass mat stay behind
+  surface_depth 0.004
+  color 0.25 0.24 0.24
+  source "PROTOTYPE estimates pending ASTM E1354 data for asphalt shingles (Phase 6 data job)"
+end
+
+material fiberglass
+  name "Glass-fiber insulation (batt / blown)"
+  density 12
+  conductivity 0.040
+  specific_heat 840
+  emissivity 0.9
+  combustible no
+  fail_temp 973          # prototype: sinters / melts away ~700 C
+  fail_time 30
+  color 0.95 0.85 0.55
+  source "k: ASTM C665 / manufacturer data R-3.2 per inch blown (verify); fail_temp PROTOTYPE"
+end
+
+material pu_foam
+  name "Flexible polyurethane foam (upholstery, mattress)"
+  density 28
+  conductivity 0.035
+  specific_heat 1400
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 570
+  heat_of_gasification 1.6e6
+  heat_of_combustion 23.0e6
+  soot_yield 0.20
+  aerosol_yield 0.05
+  char_yield 0.05
+  surface_depth 0.005
+  color 0.85 0.80 0.45
+  source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, flexible polyurethane foams GM21-GM27 (verify)"
+  source "density: typical upholstery grade 1.8 lb/ft3 (verify against NIST TN 2303 items)"
+end
+
+material fabric
+  name "Upholstery and bedding fabric, cotton/polyester"
+  density 300
+  conductivity 0.06
+  specific_heat 1300
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 590
+  heat_of_gasification 2.5e6
+  heat_of_combustion 18.0e6
+  soot_yield 0.05
+  aerosol_yield 0.04
+  char_yield 0.10
+  surface_depth 0.002
+  color 0.35 0.42 0.62
+  source "PROTOTYPE blend of Tewarson cotton and polyester values (SFPE Handbook, verify)"
+end
+
+material nylon_carpet
+  name "Nylon carpet with pad"
+  density 200
+  conductivity 0.06
+  specific_heat 1500
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 620
+  heat_of_gasification 2.5e6
+  heat_of_combustion 20.0e6
+  soot_yield 0.075
+  aerosol_yield 0.04
+  char_yield 0.10
+  surface_depth 0.003
+  color 0.55 0.50 0.44
+  source "PROTOTYPE from Tewarson nylon values derated for backing and pad (SFPE Handbook, verify)"
+end
+
+material pvc_vinyl
+  name "PVC (vinyl siding, soffit, sheet flooring)"
+  density 1380
+  conductivity 0.16
+  specific_heat 1000
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 570
+  heat_of_gasification 2.5e6
+  heat_of_combustion 7.7e6
+  soot_yield 0.10
+  aerosol_yield 0.05
+  char_yield 0.15
+  surface_depth 0.001
+  color 0.90 0.90 0.86
+  source "dHc, soot: Tewarson, SFPE Handbook, rigid PVC (verify)"
+end
+
+material steel
+  name "Carbon steel (appliance shells, connector plates)"
+  density 7850
+  conductivity 45
+  specific_heat 500
+  emissivity 0.8
+  combustible no
+  color 0.75 0.76 0.78
+  source "Incropera & DeWitt, Table A.1, plain carbon steel (verify)"
+end
