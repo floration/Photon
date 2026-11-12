@@ -43,7 +43,10 @@ struct Barrier {
     int opening = -1;           // scene opening (door / window), -1 none
     int room = -1;              // scene room on the inside face, -1 none
     int front = 0, back = 0;    // intact layers [front, back] in assembly order
-    float T[2] = {293.15f, 293.15f};     // node temperature: inside face, outside face
+    float T[2] = {293.15f, 293.15f};     // surface temperature: inside face, outside face
+    // Phase 4: 1D conduction through the layers, up to 3 nodes per layer
+    float lt[MAX_LAYERS][3] = {{293.15f, 293.15f, 293.15f}, {293.15f, 293.15f, 293.15f}, {293.15f, 293.15f, 293.15f},
+                               {293.15f, 293.15f, 293.15f}, {293.15f, 293.15f, 293.15f}, {293.15f, 293.15f, 293.15f}};
     float mass[MAX_LAYERS] = {};         // remaining burnable (or failing) kg/m2 per layer
     float damage[MAX_LAYERS] = {};
     float radIn[2] = {0, 0};             // radiant energy received this step (J)
@@ -170,7 +173,7 @@ public:
     static constexpr float GAMMA = CP / (CP - RS);   // consistent with cp and R of the gas model
     static constexpr float CHI_R = 0.35f;      // radiative fraction of flame heat (FDS default)
     static constexpr float RAD_INTERVAL = 0.2f; // s of simulated time between radiation traces
-    static constexpr float T_CRIT = 1500.0f;   // critical flame temperature, K
+    static constexpr float T_CRIT = 1600.0f;   // critical flame temperature, K (FDS extinction model; verify default)
     static constexpr float T_AUTO = 800.0f;    // fuel gas auto-ignition, K
     static constexpr float TAU_MIX = 0.1f;     // s, mixing time at 20 cm
     static constexpr float SIGMA = 5.670374e-8f;
@@ -182,6 +185,9 @@ public:
     bool radiationOn = true;
     bool adiabaticSurfaces = false;
     void clearLeakage();       // every crack closed (FDS cases without leakage)
+    // solid conduction and pyrolysis kinetics for one solid fuel cell (public for tests)
+    float conductSlab(int c, const Material& m, float flux, float dt);   // returns the new surface temperature
+    float pyrolyzeSlab(int c, const Material& m, float area, float dt);  // kg released; cools the reacting nodes
 
     bool build(const Scene& scene, const MaterialLibrary& lib, std::string& err);   // discretize.cpp
     float step(float dtMax);                                                       // returns dt
@@ -191,7 +197,7 @@ public:
     // from the same scene and profile; it refuses anything else with a message.
     bool saveState(const std::string& path, std::string& err) const;
     bool loadState(const std::string& path, std::string& err);
-    static constexpr uint32_t STATE_VERSION = 2;
+    static constexpr uint32_t STATE_VERSION = 3;
     bool toggleOpening(int opening);   // door: open/close, window: break; returns new "open" state
     // used by the structure model
     void addEvent(const std::string& key, const std::string& text) { logEvent(key, text); }
@@ -227,6 +233,8 @@ public:
     std::vector<float> p, S;             // pressure, expansion source (1/s)
     std::vector<float> T, Yo, Yf, Ys, Ya, Yp;   // gas: K, O2, fuel, soot, aerosol, soot potential (mass fractions)
     std::vector<float> Yc, Yw, Yco;      // CO2, H2O, CO mass fractions
+    std::vector<float> Yai;              // fuel mass fraction x its auto-ignition temperature (mixture AIT = Yai / Yf)
+    std::vector<float> matAIT;           // per material: mass-weighted auto-ignition K of its burnable off-gases
     std::vector<float> nu;               // m2/s, eddy viscosity (Deardorff LES), cell centered
     std::vector<float> Pb;               // Pa, background pressure of the cell's zone
     std::vector<int> zone;               // pressure zone per gas cell, -1 solid
@@ -245,6 +253,11 @@ public:
     std::vector<float> fuelMass, fuelMass0, charMass, fuelT, fuelArea, radQ, condQ;
     std::vector<float> burnFrac;         // flaming fraction of the cell's fuel surface (sub-grid spread)
     std::vector<float> ignE;             // J/m2 a touching flame has delivered to the unburned surface
+    // 1D heat conduction into solid fuel cells (Phase 4): SLAB_NODES nodes from
+    // the exposed surface inward, geometric spacing, adiabatic at the back
+    static constexpr int SLAB_NODES = 8;
+    std::vector<float> slab;             // K, N * SLAB_NODES (used by solid fuel cells only)
+    std::vector<float> slabF;            // unreacted fraction of each slab node
     std::vector<int> solidCells;
     std::vector<float> itemMass0, itemPyro;   // per item: initial mass, off-gassed mass
     std::vector<uint8_t> itemFlags;
@@ -319,7 +332,7 @@ private:
     float stableDt(float dtMax) const;
     void gatherStats(float dt);
 
-    void addGasSpecies(int c, float fuelGen, float aerosol, float sootPot);
+    void addGasSpecies(int c, float fuelGen, float aerosol, float sootPot, float ait = T_AUTO);
     float cellSpeed(int c) const;
     float surfaceHeating(int g, float Tg, float Ts, float h, float area) const;
     void unblockCell(int c);

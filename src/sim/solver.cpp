@@ -209,12 +209,13 @@ float Solver::cellSpeed(int c) const {
     return std::sqrt(uu * uu + vv * vv + ww * ww);
 }
 
-void Solver::addGasSpecies(int c, float fuelGen, float aerosol, float sootPot) {
+void Solver::addGasSpecies(int c, float fuelGen, float aerosol, float sootPot, float ait) {
     float m = gasDensity(c) * dx * dx * dx;
     float madd = fuelGen + aerosol;
     if (madd <= 0) return;
     float mt = m + madd, sc = m / mt;
     Yo[c] *= sc; Ys[c] *= sc; Yc[c] *= sc; Yw[c] *= sc; Yco[c] *= sc;
+    Yai[c] = Yai[c] * sc + fuelGen * ait / mt;
     Yf[c] = Yf[c] * sc + fuelGen / mt;
     Ya[c] = Ya[c] * sc + aerosol / mt;
     Yp[c] = Yp[c] * sc + sootPot / mt;
@@ -295,7 +296,11 @@ void Solver::combustion(float dt) {
             float yf = Yf[c];
             if (yf < 1e-6f) continue;
             float Tc = T[c];
-            bool ign = pilot[c] || Tc > T_AUTO;
+            // ignition: a pilot flame, a burning neighbor, or the local fuel
+            // mixture's own auto-ignition temperature (mass-weighted over the
+            // gases that made it, data/gases.txt)
+            float ait = yf > 1e-9f ? Yai[c] / yf : T_AUTO;
+            bool ign = pilot[c] || Tc > ait;
             if (!ign) {
                 int i = c % nx, j = (c / nx) % ny, k = c / sz;
                 ign = (i > 0 && lit[c - sx]) || (i < nx - 1 && lit[c + sx]) || (j > 0 && lit[c - sy]) ||
@@ -306,8 +311,11 @@ void Solver::combustion(float dt) {
             if (burnable <= 1e-7f) continue;
             // Extinction: limiting O2 falls linearly from 0.15 at ambient to 0 at the
             // critical flame temperature (the simple FDS 5 style criterion).
-            float yoLim = 0.15f * std::clamp((T_CRIT - Tc) / (T_CRIT - T0), 0.0f, 1.0f);
-            if (!pilot[c] && Yo[c] < yoLim) continue;
+            // extinction (FDS-style critical flame temperature): the fuel burns
+            // only if fuel plus the air carrying the oxygen it needs (with that
+            // air's diluents) would reach T_CRIT; vitiated or cold mixtures don't
+            float tAd = Tc + DHC_FUEL / (CP * (1.0f + S_O2 / std::max(Yo[c], 1e-4f)));
+            if (!pilot[c] && tAd < T_CRIT) continue;
             float m = gasDensity(c) * V;
             float dmf = burnable * m * frac;
             float q = dmf * DHC_FUEL;
@@ -316,6 +324,7 @@ void Solver::combustion(float dt) {
             float co2Made = std::max(0.0f, (C_FRAC * dmf / m - sootMade - (12.0f / 28.0f) * coMade) * (44.0f / 12.0f));
             float o2Used = s * dmf / m - (32.0f / 12.0f) * sootMade - (16.0f / 28.0f) * coMade;
             Yf[c] = std::max(0.0f, yf - dmf / m);
+            Yai[c] = Yf[c] * ait;
             Yo[c] = std::max(0.0f, Yo[c] - o2Used);
             Yp[c] = std::max(0.0f, Yp[c] - sootMade);
             Ys[c] += sootMade;
@@ -354,6 +363,70 @@ float Solver::surfaceHeating(int g, float Tg, float Ts, float h, float area) con
     return (1 - phi) * conv + phi * std::max(conv, flame);
 }
 
+// Implicit (backward Euler) 1D conduction from the exposed surface into a
+// solid: node thicknesses grow geometrically from 0.5 mm (about 25 mm deep in
+// total, deeper than the heat penetrates in the minutes before a surface
+// ignites), flux boundary at the surface, adiabatic at the back. Properties
+// are the material's (constant for now; temperature-dependent data is a
+// Phase 4 data job).
+float Solver::conductSlab(int c, const Material& m, float flux, float dt) {
+    constexpr int n = SLAB_NODES;
+    static const float dz[n] = {0.0005f, 0.0008f, 0.0012f, 0.0018f, 0.0027f, 0.0040f, 0.0060f, 0.0090f};
+    float* Tn = &slab[(size_t)c * n];
+    const float rc = std::max(1.0f, m.density * m.specificHeat), k = std::max(1e-3f, m.conductivity);
+    float a[n], b[n], cc[n], d[n];
+    for (int i = 0; i < n; ++i) {
+        float cap = rc * dz[i] / dt;
+        float gl = i > 0 ? k / (0.5f * (dz[i - 1] + dz[i])) : 0.0f;
+        float gr = i < n - 1 ? k / (0.5f * (dz[i] + dz[i + 1])) : 0.0f;
+        a[i] = -gl;
+        cc[i] = -gr;
+        b[i] = cap + gl + gr;
+        d[i] = cap * Tn[i] + (i == 0 ? flux : 0.0f);
+    }
+    for (int i = 1; i < n; ++i) {   // Thomas algorithm
+        float w = a[i] / b[i - 1];
+        b[i] -= w * cc[i - 1];
+        d[i] -= w * d[i - 1];
+    }
+    Tn[n - 1] = d[n - 1] / b[n - 1];
+    for (int i = n - 2; i >= 0; --i) Tn[i] = (d[i] - cc[i] * Tn[i + 1]) / b[i];
+    for (int i = 0; i < n; ++i) Tn[i] = std::clamp(Tn[i], 200.0f, 2300.0f);
+    // the first node's mean sits half a node in; the surface is hotter by the
+    // flux across that half node
+    return std::clamp(Tn[0] + flux * 0.5f * dz[0] / k, 200.0f, 2300.0f);
+}
+
+// First-order Arrhenius pyrolysis in each slab node. With the FDS User Guide
+// construction from the peak temperature Tp of a 5 K/min TGA run and the
+// reaction's width dT: r_p = 2 beta / dT, E/R = e r_p Tp^2 / beta, and
+// k(T) = e r_p exp((E/R)(1/Tp - 1/T)). The reaction absorbs the material's heat
+// of gasification. When the surface node is spent the profile shifts inward
+// (the surface recedes into the block).
+float Solver::pyrolyzeSlab(int c, const Material& m, float area, float dt) {
+    constexpr int n = SLAB_NODES;
+    static const float dz[n] = {0.0005f, 0.0008f, 0.0012f, 0.0018f, 0.0027f, 0.0040f, 0.0060f, 0.0090f};
+    const float beta = 5.0f / 60.0f, e = 2.718281828f;
+    const float rp = 2.0f * beta / std::max(10.0f, m.pyrolysisRange);
+    const float EoR = e * rp * m.pyrolysisTemp * m.pyrolysisTemp / beta;
+    float* Tn = &slab[(size_t)c * n];
+    float* F = &slabF[(size_t)c * n];
+    double dm = 0;
+    for (int i = 0; i < n; ++i) {
+        if (F[i] <= 0 || Tn[i] < m.pyrolysisTemp - 3.0f * m.pyrolysisRange) continue;
+        float k = e * rp * std::exp(std::min(30.0f, EoR * (1.0f / m.pyrolysisTemp - 1.0f / Tn[i])));
+        float df = F[i] * (1.0f - std::exp(-k * dt));
+        F[i] -= df;
+        dm += (double)m.density * dz[i] * df * area;
+        Tn[i] -= df * m.heatOfGasification / std::max(1.0f, m.specificHeat);
+    }
+    if (F[0] < 0.02f && fuelMass[c] > dm + 1e-4) {   // recede: shift the profile one node inward
+        for (int i = 0; i < n - 1; ++i) { Tn[i] = Tn[i + 1]; F[i] = F[i + 1]; }
+        F[n - 1] = 1.0f;
+    }
+    return (float)dm;
+}
+
 void Solver::unblockCell(int c) {
     blocked[c] = 0;
     porous[c] = 1;
@@ -368,7 +441,7 @@ void Solver::unblockCell(int c) {
         if (nb[q] >= 0 && !blocked[nb[q]]) { sT += T[nb[q]]; sO += Yo[nb[q]]; n += 1; }
     T[c] = n > 0 ? sT / n : T0;
     Yo[c] = n > 0 ? sO / n : YO2_AMB;
-    Yf[c] = Ys[c] = Ya[c] = Yp[c] = Yco[c] = 0;
+    Yf[c] = Ys[c] = Ya[c] = Yp[c] = Yco[c] = Yai[c] = 0;
     Yc[c] = YCO2_AMB;
     Yw[c] = YH2O_AMB;
     nu[c] = 0;
@@ -481,7 +554,17 @@ void Solver::solidsStep(float dt) {
         float radIn = radQ[c];
         Qs -= bf * radIn;
         Pburn += bf * radIn / dt;
-        Ts += Qs / C;
+        float slabDm = 0;
+        if (blocked[c]) {
+            // thermally thick solid: everything the surface absorbs (the burning
+            // part's flame included) conducts inward; Arrhenius kinetics in each
+            // node decide how fast it gasifies
+            float qAll = (Qs + std::max(0.0f, Pburn) * dt) / (std::max(area, 1e-4f) * dt);
+            Ts = conductSlab(c, m, qAll, dt);
+            if (m.combustible && fuelMass[c] > 0) slabDm = pyrolyzeSlab(c, m, area, dt);
+        } else {
+            Ts += Qs / C;
+        }
         // char surface oxidation (glowing)
         if (charMass[c] > 0 && Ts > 700.0f && ng > 0 && yoAvg > 0.01f) {
             float dm = std::min(charMass[c], CHAR_K * yoAvg * area * dt);
@@ -497,7 +580,7 @@ void Solver::solidsStep(float dt) {
         if (m.combustible && fuelMass[c] > 0 && ng > 0) {
             // ignition of the unburned part
             bool ignite = false;
-            if (Ts >= Tp) { Ts = Tp; ignite = true; }   // excess heat goes on into the interior (thermally thick)
+            if (Ts >= Tp) { if (!blocked[c]) Ts = Tp; ignite = true; }   // thin fuel: excess heat goes on inward
             if (flameTouch > 0) {
                 ignE[c] += flameTouch * dt;
                 float need = m.density * m.surfaceDepth * m.specificHeat * (Tp - T0);   // J/m2 to heat the surface layer
@@ -519,13 +602,14 @@ void Solver::solidsStep(float dt) {
             static int dbg = std::getenv("PHOTON_DEBUG_CELL") ? std::atoi(std::getenv("PHOTON_DEBUG_CELL")) : -1;
             if (c == dbg) std::fprintf(stderr, "t=%.2f c=%d Ts=%.0f bf=%.4f ignE=%.0f touch=%.0f Pburn=%.1f hrr=%.0f pilot=%d Tg=%.0f fuel=%.4f\n", time, c, Ts, burnFrac[c], ignE[c], flameTouch, Pburn, hrr[c], pilot[c], T[c], fuelMass[c]);
         }
-        if (m.combustible && fuelMass[c] > 0 && bf > 0 && Pburn > 0 && ng > 0) {
-            float dm = std::min(fuelMass[c], Pburn * dt / m.heatOfGasification);
+        float gasified = blocked[c] ? slabDm : (bf > 0 && Pburn > 0 ? Pburn * dt / m.heatOfGasification : 0.0f);
+        if (m.combustible && fuelMass[c] > 0 && gasified > 0 && ng > 0) {
+            float dm = std::min(fuelMass[c], gasified);
             fuelMass[c] -= dm;
             if (m.charYield < 0.99f) charMass[c] += dm * m.charYield / (1.0f - m.charYield);
             float gen = dm * (1.0f - m.aerosolYield) * m.heatOfCombustion / DHC_FUEL;
             for (int q = 0; q < ng; ++q)
-                addGasSpecies(gas[q], gen / ng, dm * m.aerosolYield / ng, dm * m.sootYield / ng);
+                addGasSpecies(gas[q], gen / ng, dm * m.aerosolYield / ng, dm * m.sootYield / ng, matAIT[fuelMat[c]]);
             stats.pyrolysis += dm / dt;
             int it = itemOf[c];
             if (it >= 0) {
@@ -601,20 +685,54 @@ void Solver::barriersStep(float dt) {
             Q[g[s]] -= conv * A * dt;
         }
         float e0 = (flux[0] * A * dt + b.radIn[0]) / A, e1 = (flux[1] * A * dt + b.radIn[1]) / A;  // J/m2
-        if (L[0] == L[1]) {
-            float Tn = b.T[0] + (e0 + e1) / C[0];
-            b.T[0] = b.T[1] = Tn;
-        } else {
-            float R = 0.5f * lib->layerR(as.layers[L[0]]) + 0.5f * lib->layerR(as.layers[L[1]]);
-            for (int l = L[0] + 1; l < L[1]; ++l) R += lib->layerR(as.layers[l]);
-            float U = 1.0f / std::max(R, 1e-3f);
-            // implicit-enough for stability: limit the exchange to the equilibrium value
-            float qc = U * (b.T[0] - b.T[1]) * dt;
-            float eqMax = (b.T[0] - b.T[1]) * C[0] * C[1] / (C[0] + C[1]);
-            if (std::fabs(qc) > std::fabs(eqMax)) qc = eqMax;
-            b.T[0] += (e0 - qc) / C[0];
-            b.T[1] += (e1 + qc) / C[1];
+        // 1D implicit conduction through the intact layers [front, back]. Each
+        // layer gets 1-3 nodes by thickness; layers given only as an R-value
+        // (stud cavities, batts) conduct through that R. Surfaces take the
+        // step's absorbed energy (convection, flame, radiation, emission).
+        {
+            constexpr int MAXN = MAX_LAYERS * 3;
+            float cap[MAXN], gR[MAXN], Tn[MAXN];
+            int lay[MAXN], sub[MAXN], nn = 0;
+            float prevHalfR = 0;
+            for (int l = L[0]; l <= L[1]; ++l) {
+                const Layer& ly = as.layers[l];
+                const Material& ml = lib->materials[ly.material];
+                int nl = ly.thickness < 0.003f ? 1 : ly.thickness < 0.02f ? 2 : 3;
+                float am = ml.combustible ? std::max(b.mass[l], 0.01f) : std::max(lib->arealMass(ly), 0.01f);
+                float Rl = std::max(lib->layerR(ly), 1e-5f);
+                for (int q = 0; q < nl; ++q) {
+                    cap[nn] = std::max(50.0f, am / nl * ml.specificHeat);
+                    lay[nn] = l;
+                    sub[nn] = q;
+                    Tn[nn] = b.lt[l][q];
+                    // conductance to the previous node: half of each node's resistance
+                    if (nn > 0) gR[nn - 1] = 1.0f / std::max(prevHalfR + 0.5f * Rl / nl, 1e-5f);
+                    prevHalfR = 0.5f * Rl / nl;
+                    ++nn;
+                }
+            }
+            float aa[MAXN], bb[MAXN], cc[MAXN], dd[MAXN];
+            for (int i = 0; i < nn; ++i) {
+                float gl = i > 0 ? gR[i - 1] : 0.0f, gr = i < nn - 1 ? gR[i] : 0.0f;
+                aa[i] = -gl * dt;
+                cc[i] = -gr * dt;
+                bb[i] = cap[i] + (gl + gr) * dt;
+                dd[i] = cap[i] * Tn[i] + (i == 0 ? e0 : 0.0f) + (i == nn - 1 ? e1 : 0.0f);
+            }
+            for (int i = 1; i < nn; ++i) {
+                float w = aa[i] / bb[i - 1];
+                bb[i] -= w * cc[i - 1];
+                dd[i] -= w * dd[i - 1];
+            }
+            Tn[nn - 1] = dd[nn - 1] / bb[nn - 1];
+            for (int i = nn - 2; i >= 0; --i) Tn[i] = (dd[i] - cc[i] * Tn[i + 1]) / bb[i];
+            for (int i = 0; i < nn; ++i) b.lt[lay[i]][sub[i]] = std::clamp(Tn[i], 200.0f, 2300.0f);
+            b.T[0] = b.lt[lay[0]][sub[0]];
+            b.T[1] = b.lt[lay[nn - 1]][sub[nn - 1]];
+            C[0] = cap[0];
+            C[1] = cap[nn - 1];
         }
+        const int f0 = b.front, k0 = b.back;
         // per-node layer processes (single-layer: only side 0 acts)
         for (int s = 0; s < (L[0] == L[1] ? 1 : 2); ++s) {
             int li = L[s];
@@ -632,7 +750,7 @@ void Solver::barriersStep(float dt) {
                     int gc = g[s] >= 0 ? g[s] : g[1 - s];
                     if (gc >= 0) {
                         float gen = dmA * (1.0f - m.aerosolYield) * m.heatOfCombustion / DHC_FUEL;
-                        addGasSpecies(gc, gen, dmA * m.aerosolYield, dmA * m.sootYield);
+                        addGasSpecies(gc, gen, dmA * m.aerosolYield, dmA * m.sootYield, matAIT[as.layers[li].material]);
                         stats.pyrolysis += dmA / dt;
                     }
                 }
@@ -665,12 +783,18 @@ void Solver::barriersStep(float dt) {
                 }
                 break;
             }
-            // newly exposed layer starts at the old node temperature
+            // the newly exposed layer keeps its own computed temperature profile
             if (s == 0) { L[0] = b.front; } else { L[1] = b.back; }
-            if (b.front == b.back) b.T[0] = b.T[1] = std::max(b.T[0], b.T[1]);
             if (b.kind == BarrierKind::Ceiling && s == 0 && !m.combustible)
                 logEvent("ceil-gyp-" + roomName(b.room), "Ceiling gypsum falling in " + roomName(b.room));
         }
+        if (b.failed) continue;
+        // sync the surface nodes with what the layer processes did
+        auto lastNode = [&](int l) { float t = as.layers[l].thickness; return t < 0.003f ? 0 : t < 0.02f ? 1 : 2; };
+        if (b.front == f0) b.lt[f0][0] = b.T[0]; else b.T[0] = b.lt[b.front][0];
+        if (b.back == k0) { if (b.front != b.back || b.front == f0) b.lt[k0][lastNode(k0)] = b.T[1]; }
+        else b.T[1] = b.lt[b.back][lastNode(b.back)];
+        if (b.front == b.back && lastNode(b.front) == 0) b.T[1] = b.T[0];
     }
 }
 

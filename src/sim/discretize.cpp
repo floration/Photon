@@ -28,7 +28,20 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     fill(bx, NX, -1); fill(by, NY, -1); fill(bz, NZ, -1);
     fill(p, N, 0.f); fill(S, N, 0.f); fill(T, N, T0); fill(Yo, N, YO2_AMB);
     fill(Yf, N, 0.f); fill(Ys, N, 0.f); fill(Ya, N, 0.f); fill(Yp, N, 0.f);
-    fill(Yc, N, YCO2_AMB); fill(Yw, N, YH2O_AMB); fill(Yco, N, 0.f); fill(nu, N, 0.f);
+    fill(Yc, N, YCO2_AMB); fill(Yw, N, YH2O_AMB); fill(Yco, N, 0.f); fill(nu, N, 0.f); fill(Yai, N, 0.f);
+    // auto-ignition of each material's burnable off-gas mixture (mass-weighted)
+    matAIT.assign(lb.materials.size(), T_AUTO);
+    for (size_t mi = 0; mi < lb.materials.size(); ++mi) {
+        double w = 0, sum = 0;
+        for (const Offgas& og : lb.materials[mi].offgas) {
+            if (og.gas < 0) continue;
+            const Gas& g = lb.gases[og.gas];
+            if (g.heatOfCombustion <= 0 || g.autoignition <= 0) continue;
+            w += og.massFraction;
+            sum += og.massFraction * g.autoignition;
+        }
+        if (w > 0) matAIT[mi] = (float)(sum / w);
+    }
     fill(Pb, N, P0); fill(zone, N, -1); fill(massSrc, N, 0.f);
     zoneP.clear(); zoneOpen.clear(); burners.clear();
     fill(ax_, NX, 0.f); fill(ay_, NY, 0.f); fill(az_, NZ, 0.f);
@@ -41,7 +54,7 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     fill(blocked, N, (uint8_t)0); fill(porous, N, (uint8_t)0);
     fill(fuelMat, N, (int16_t)-1); fill(itemOf, N, (int16_t)-1);
     fill(fuelMass, N, 0.f); fill(fuelMass0, N, 0.f); fill(charMass, N, 0.f);
-    fill(fuelT, N, T0); fill(fuelArea, N, 0.f); fill(radQ, N, 0.f); fill(condQ, N, 0.f); fill(burnFrac, N, 0.f); fill(ignE, N, 0.f);
+    fill(fuelT, N, T0); fill(fuelArea, N, 0.f); fill(radQ, N, 0.f); fill(condQ, N, 0.f); fill(burnFrac, N, 0.f); fill(ignE, N, 0.f); fill(slab, (size_t)N * SLAB_NODES, T0); fill(slabF, (size_t)N * SLAB_NODES, 1.f);
     for (auto& t : tmp_) t.assign(N, 0.f);
     u2_.assign(NX, 0.f); v2_.assign(NY, 0.f); w2_.assign(NZ, 0.f); rhs_.assign(N, 0.f);
     barriers.clear(); ignitions.clear(); events.clear(); eventKeys_.clear(); solidCells.clear();

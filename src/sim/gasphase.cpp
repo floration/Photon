@@ -683,9 +683,9 @@ void Solver::project(float dt) {
 // then turbulent + molecular diffusion of species. The new value is bounded by
 // the cell's and its neighbors' old values.
 void Solver::advectScalars(float dt) {
-    constexpr int NF = 9;
-    std::vector<float>* fields[NF] = {&T, &Yo, &Yf, &Ys, &Ya, &Yp, &Yc, &Yw, &Yco};
-    const float amb[NF] = {T0, YO2_AMB, 0, 0, 0, 0, YCO2_AMB, YH2O_AMB, 0};
+    constexpr int NF = 10;
+    std::vector<float>* fields[NF] = {&T, &Yo, &Yf, &Ys, &Ya, &Yp, &Yc, &Yw, &Yco, &Yai};
+    const float amb[NF] = {T0, YO2_AMB, 0, 0, 0, 0, YCO2_AMB, YH2O_AMB, 0, 0};
     const float s = dt / dx, sd = dt / (dx * dx);
     const int sxy = nx * ny;
     pool_->parallelFor(nz, [&](int kb, int ke) {

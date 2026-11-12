@@ -45,6 +45,10 @@ struct Material {
     // Sub-grid flame spread over a surface inside one grid cell (MODELED, see
     // docs/FLASHOVER.md): m/s sideways/downward and upward with no external heat.
     float spreadLateral = 0.003f, spreadUp = 0.03f;
+    // Pyrolysis kinetics (Phase 4): one first-order Arrhenius reaction whose
+    // mass-loss rate peaks at pyrolysis_temp in a 5 K/min TGA run and spans
+    // pyrolysis_range kelvin (A and E derived as in the FDS User Guide).
+    float pyrolysisRange = 80.0f;
     // Non-combustible failure (fall-off, crack-out, melt); 0 = never
     float failTemp = 0;             // K
     float failTime = 0;             // s above failTemp before the layer is gone

@@ -566,6 +566,60 @@ TEST(wind_flows_around_building) {
     CHECK_MSG(std::fabs(s.u[s.xface(i, j, k)]) < 0.05f, "wind inside the closed room");
 }
 
+// ------------------------------------------------------- heat and burning --
+// Phase 4 verification: exact answers for conduction and kinetics.
+
+// Constant flux into a thick solid: surface rise 2 q sqrt(t / (pi k rho c)).
+TEST(slab_conduction_semi_infinite) {
+    Solver s(2);
+    CHECK(buildRoom(s, true));
+    Material m;
+    m.density = 500; m.conductivity = 0.12f; m.specificHeat = 1400;
+    const float q = 10000.0f, dt = 0.05f;
+    float Ts = 0;
+    int c = roomCell(s);
+    for (int i = 0; i < 600; ++i) Ts = s.conductSlab(c, m, q, dt);   // 30 s: penetration ~ 1.5 mm, well inside the slab
+    float t = 600 * dt;
+    float exact = Solver::T0 + 2 * q * std::sqrt(t / (3.14159265f * m.conductivity * m.density * m.specificHeat));
+    CHECK_MSG(std::fabs(Ts - exact) < 0.05f * (exact - Solver::T0),
+              "surface " + std::to_string(Ts) + " K, exact " + std::to_string(exact) + " K");
+}
+
+// Heated at 5 K/min the Arrhenius reaction must lose mass fastest near the
+// material's pyrolysis temperature (that is how A and E are derived).
+TEST(pyrolysis_peak_at_reference_temperature) {
+    Solver s(2);
+    CHECK(buildRoom(s, true));
+    Material m;
+    m.density = 500; m.specificHeat = 1400; m.heatOfGasification = 0;   // no self-cooling: a TGA sample follows the oven
+    m.pyrolysisTemp = 600; m.pyrolysisRange = 80;
+    int c = roomCell(s);
+    float* Tn = &s.slab[(size_t)c * Solver::SLAB_NODES];
+    float* F = &s.slabF[(size_t)c * Solver::SLAB_NODES];
+    for (int i = 0; i < Solver::SLAB_NODES; ++i) { Tn[i] = 400; F[i] = 1; }
+    const float dt = 0.5f, beta = 5.0f / 60.0f;
+    float best = 0, bestT = 0;
+    s.fuelMass[c] = 0;   // keep the profile from receding
+    for (int i = 0; i < 6000 && Tn[0] < 800; ++i) {
+        for (int q = 0; q < Solver::SLAB_NODES; ++q) Tn[q] += beta * dt;
+        float dm = s.pyrolyzeSlab(c, m, 1.0f, dt);
+        if (dm > best) { best = dm; bestT = Tn[0]; }
+    }
+    CHECK_MSG(std::fabs(bestT - 600) < 15, "peak mass loss at " + std::to_string(bestT) + " K, expected 600 K");
+}
+
+// Extinction: with the critical flame temperature, fuel mixed with air at
+// ambient temperature stops burning near 12% O2 by mass (about 11% by volume,
+// the measured limiting oxygen concentration range for hydrocarbon fuels).
+TEST(extinction_limiting_oxygen) {
+    auto tad = [](float T, float yo) { return T + Solver::DHC_FUEL / (Solver::CP * (1 + Solver::S_O2 / yo)); };
+    float lo = 0.02f, hi = 0.23f;
+    for (int i = 0; i < 40; ++i) { float mid = 0.5f * (lo + hi); (tad(Solver::T0, mid) < Solver::T_CRIT ? lo : hi) = mid; }
+    CHECK_MSG(lo > 0.10f && lo < 0.14f, "limiting O2 mass fraction " + std::to_string(lo));
+    CHECK(tad(Solver::T0, 0.232f) > Solver::T_CRIT);   // air burns
+    CHECK(tad(600.0f, 0.10f) > Solver::T_CRIT);        // hot vitiated gas still burns (backdraft fuel)
+}
+
 int main(int argc, char** argv) {
     const char* filter = argc > 1 ? argv[1] : nullptr;
     int run = 0;
