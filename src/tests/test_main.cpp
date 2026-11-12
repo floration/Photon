@@ -8,6 +8,7 @@
 #include "scene/scene.h"
 #include "scene/textfile.h"
 #include "sim/solver.h"
+#include "sim/structure.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -356,6 +357,38 @@ TEST(burner_heats_and_burns) {
     for (int c = 0; c < s.N; ++c)
         if (s.Yo[c] < 0 || s.Yo[c] > 0.2321f || s.T[c] < 199 || s.T[c] > 2301 || std::isnan(s.T[c])) okRange = false;
     CHECK(okRange);
+}
+
+TEST(structure_stable_then_collapses) {
+    World& w = world();
+    Solver s;
+    std::string err;
+    CHECK_MSG(s.build(w.scene, w.lib, err), err);
+    Structure st;
+    CHECK(st.build(w.scene, w.lib, s));
+    CHECK(st.pieces().size() > 1500);
+    float total = 0;
+    for (const Piece& p : st.pieces()) total += p.mass;
+    CHECK_MSG(total > 20000 && total < 400000, "house mass " + std::to_string(total) + " kg");   // tens of tonnes incl. slab
+    st.update(s, 0.25f);
+    CHECK_MSG(st.fallenCount() == 0, "pieces fell with no fire");
+    int falling = 0;
+    for (const Piece& p : st.pieces()) falling += p.state != PieceState::Standing;
+    CHECK_MSG(falling == 0, std::to_string(falling) + " pieces unstable at t=0");
+    // burn away all the roof framing: the roof deck must come down
+    for (int c : s.solidCells)
+        if (s.porous[c] && s.fuelMat[c] == w.lib.findMaterial("lumber_spf") && c / (s.nx * s.ny) >= s.kFloorS[1]) s.fuelMass[c] = 0;
+    for (size_t b = 0; b < s.barriers.size(); ++b) {   // and the rafters inside the sloped ceilings
+        if (s.barriers[b].kind != BarrierKind::Roof) continue;
+        const Assembly& as = w.lib.assemblies[s.barriers[b].assembly];
+        for (int l = 0; l < (int)as.layers.size(); ++l)
+            if (as.layers[l].fill < 0.999f) s.removeLayer((int)b, l);
+    }
+    for (int i = 0; i < 20; ++i) st.update(s, 0.25f);
+    int deckDown = 0, deck = 0;
+    for (const Piece& p : st.pieces())
+        if (w.scene.objects[p.object].kind == "roof deck panel") { ++deck; deckDown += p.state != PieceState::Standing; }
+    CHECK_MSG(deck > 0 && deckDown > deck / 2, std::to_string(deckDown) + " of " + std::to_string(deck) + " deck panels fell");
 }
 
 int main(int argc, char** argv) {

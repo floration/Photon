@@ -6,6 +6,7 @@
 #include "scene/materials.h"
 #include "scene/scene.h"
 #include "sim/solver.h"
+#include "sim/structure.h"
 #include "app/ui.h"
 #include <algorithm>
 #include <atomic>
@@ -59,6 +60,8 @@ private:
     MaterialLibrary lib_;
     Scene scene_;
     std::unique_ptr<Solver> sim_;
+    Structure struct_;            // weight, supports, gravity
+    float lastStructT_ = 0;
     Input in_;
     // camera
     float yaw_ = 0, pitch_ = 0, flySpeed_ = 5.0f;   // m/s
@@ -196,6 +199,8 @@ void Viewer::resetSim() {
     sim_ = std::make_unique<Solver>();
     std::string err;
     if (!sim_->build(scene_, lib_, err)) { showMessage("Photon", "Solver build failed: " + err); sim_.reset(); return; }
+    struct_.build(scene_, lib_, *sim_);
+    lastStructT_ = 0;
     meshDirty_ = true;
 }
 
@@ -471,6 +476,10 @@ void Viewer::simLoop() {
             std::lock_guard<std::mutex> lk(simMtx_);
             if (!sim_) continue;
             dt = sim_->step(0.05f);
+            if (sim_->time - lastStructT_ >= 0.25f) {   // structure: loads, failures, gravity
+                struct_.update(*sim_, sim_->time - lastStructT_);
+                lastStructT_ = sim_->time;
+            }
         }
         debt -= dt;
         winSim += dt;
@@ -716,6 +725,13 @@ void Viewer::buildMeshes() {
         if (!intact[it] || (scene_.items[it].story > 0 && upperCut_)) continue;
         for (const Part& pt : scene_.items[it].parts) {
             if (pt.box.z0 >= zc) continue;
+            bool fell = false;   // a part that fell is drawn with the debris
+            for (const Piece& p : struct_.pieces()) {
+                if (p.state == PieceState::Standing) continue;
+                const SceneObject& o = scene_.objects[p.object];
+                if (o.item == (int)it && std::fabs(o.c[0] - 0.5f * (pt.box.x0 + pt.box.x1)) < 1e-3f && std::fabs(o.c[2] - 0.5f * (pt.box.z0 + pt.box.z1)) < 1e-3f) { fell = true; break; }
+            }
+            if (fell) continue;
             const Material& m = lib_.materials[pt.material];
             g_pat = patFor(pt.material, 0);
             Vec3 c(0.5f * (pt.box.x0 + pt.box.x1), 0.5f * (pt.box.y0 + pt.box.y1), 0.5f * (pt.box.z0 + pt.box.z1));
@@ -751,10 +767,27 @@ void Viewer::buildMeshes() {
         if (exposed(4)) addQuad(op, P[0], P[2], P[3], P[1], Vec3(0, 0, -1), col, e);
         if (exposed(5)) addQuad(op, P[4], P[5], P[7], P[6], Vec3(0, 0, 1), col, e);
     }
+    // debris: everything that has failed and fallen, drawn where it landed
+    for (const Piece& p : struct_.pieces()) {
+        if (p.state == PieceState::Standing) continue;
+        const SceneObject& o = scene_.objects[p.object];
+        if (o.c[2] + p.dz >= zc) continue;
+        const Material& m = lib_.materials[o.material];
+        float k = 0.15f + 0.6f * std::clamp(p.integrity, 0.0f, 1.0f);
+        g_pat = patFor(o.material, 0);
+        Vec3 c(o.c[0], o.c[1], o.c[2] + p.dz);
+        addBox(op, c, Vec3(o.u[0], o.u[1], o.u[2]) * o.hu, Vec3(o.v[0], o.v[1], o.v[2]) * o.hv, Vec3(o.n[0], o.n[1], o.n[2]) * o.hn,
+               Vec3(m.color[0], m.color[1], m.color[2]) * k, Vec3());
+    }
     // framing members at their exact size; trusses take their state from the
     // attic cell they pass through
     bool showTruss = roofHidden() || framing_;
-    for (const Member& mb : scene_.members) {
+    for (size_t mbi = 0; mbi < scene_.members.size(); ++mbi) {
+        const Member& mb = scene_.members[mbi];
+        {   // members that have fallen are drawn as debris instead
+            int pc = struct_.pieceOfObject(scene_.memberObject.size() > mbi ? scene_.memberObject[mbi] : -1);
+            if (pc >= 0 && struct_.pieces()[pc].state != PieceState::Standing) continue;
+        }
         bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb || mb.kind == MemberKind::Gusset ||
                      mb.kind == MemberKind::Rafter || mb.kind == MemberKind::RidgeBoard || mb.kind == MemberKind::CollarTie;
         if (truss && !showTruss) continue;

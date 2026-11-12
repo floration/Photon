@@ -378,10 +378,13 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
 
     // ============================================================ 3 framing
     stage = STAGE_FRAMING;
-    for (const Member& m : members) {
+    memberObject.assign(members.size(), -1);
+    for (size_t mi = 0; mi < members.size(); ++mi) {
+        const Member& m = members[mi];
         float d[3] = {m.p1[0] - m.p0[0], m.p1[1] - m.p0[1], m.p1[2] - m.p0[2]};
         float L = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
         if (L < 1e-5f) continue;
+        memberObject[mi] = (int)objects.size();
         float u[3] = {d[0] / L, d[1] / L, d[2] / L}, v[3] = {m.side[0], m.side[1], m.side[2]};
         float c[3] = {0.5f * (m.p0[0] + m.p1[0]), 0.5f * (m.p0[1] + m.p1[1]), 0.5f * (m.p0[2] + m.p1[2])};
         std::string nm = memberName(m.kind);

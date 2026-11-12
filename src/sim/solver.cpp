@@ -145,6 +145,43 @@ bool Solver::toggleOpening(int opening) {
     return state;
 }
 
+void Solver::removeLayer(int bi, int layer) {
+    if (bi < 0 || bi >= (int)barriers.size()) return;
+    Barrier& b = barriers[bi];
+    if (b.failed || layer < b.front || layer > b.back) return;
+    if (layer == b.front) b.front++;
+    else if (layer == b.back) b.back--;
+    else b.mass[layer] = 0;   // an inner layer: leave its slot, nothing left to burn or insulate
+    if (b.front > b.back) { b.failed = true; updateFace(b.axis, b.face); }
+}
+
+void Solver::failBarrier(int bi) {
+    if (bi < 0 || bi >= (int)barriers.size() || barriers[bi].failed) return;
+    barriers[bi].failed = true;
+    updateFace(barriers[bi].axis, barriers[bi].face);
+}
+
+void Solver::moveFuel(int from, int to, float mass) {
+    if (from < 0 || to < 0 || from >= N || to >= N || fuelMat[from] < 0 || blocked[to]) return;
+    float take = std::min(mass, fuelMass[from]);
+    if (take <= 0) return;
+    float frac = fuelMass0[from] > 0 ? take / std::max(fuelMass[from], 1e-9f) : 0;
+    float take0 = fuelMass0[from] * std::min(1.0f, frac);
+    float area = fuelArea[from] * std::min(1.0f, frac);
+    fuelMass[from] -= take;
+    fuelMass0[from] -= take0;
+    fuelArea[from] -= area;
+    if (fuelMat[to] < 0) {
+        fuelMat[to] = fuelMat[from];
+        porous[to] = 1;
+        fuelT[to] = fuelT[from];
+        solidCells.push_back(to);
+    }
+    fuelMass[to] += take;
+    fuelMass0[to] += take0;
+    fuelArea[to] += area;
+}
+
 float Solver::cellSpeed(int c) const {
     int i, j, k;
     cellIJK(c, i, j, k);

@@ -145,6 +145,7 @@ struct Scene {
     std::vector<Fixture> fixtures;
     std::vector<Member> members;              // generated framing
     std::vector<SceneObject> objects;         // every physical piece (framing, sheets, panels, parts)
+    std::vector<int> memberObject;            // members[i] -> objects index (-1 none)
 
     bool load(const std::string& path, const MaterialLibrary& lib, std::string& err);
     float storyBase(int s) const { return s * (ceilingHeight + floorDepth); }

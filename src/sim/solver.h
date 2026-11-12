@@ -90,6 +90,11 @@ public:
     float step(float dtMax);                                                       // returns dt
     void addIgnition(int cell, float power, float duration, const std::string& label);
     bool toggleOpening(int opening);   // door: open/close, window: break; returns new "open" state
+    // used by the structure model
+    void addEvent(const std::string& key, const std::string& text) { logEvent(key, text); }
+    void removeLayer(int barrier, int layer);    // a sheet in this assembly fell away
+    void failBarrier(int barrier);               // the whole assembly fell away: open the face
+    void moveFuel(int from, int to, float mass); // falling framing carries its fuel
 
     // --- geometry helpers ----------------------------------------------------
     int nx = 0, ny = 0, nz = 0, N = 0;

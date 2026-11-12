@@ -34,7 +34,8 @@ target_link_libraries(photon_scene PUBLIC photon_core)
 # ---- sim: solver core. Must not depend on platform or render. ---------------
 add_library(photon_sim STATIC
   src/sim/discretize.cpp
-  src/sim/solver.cpp)
+  src/sim/solver.cpp
+  src/sim/structure.cpp)
 target_link_libraries(photon_sim PUBLIC photon_scene)
 
 # ---- platform: thin OS layer (Win32 now, X11 in Phase 2) --------------------
