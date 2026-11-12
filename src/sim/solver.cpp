@@ -161,8 +161,10 @@ void Solver::addGasSpecies(int c, float fuelGen, float aerosol, float sootPot) {
 // ---------------------------------------------------------------------------
 float Solver::step(float dtMax) {
     auto t0 = std::chrono::steady_clock::now();
-    float dt = std::min(dtMax, 0.25f * dx / std::max(maxVel, 0.5f));
-    dt = std::clamp(dt, 0.002f, 0.05f);
+    // Upwind transport caps each cell's inflow fraction at 1, so a few fast
+    // leak faces must not drag the whole step down: floor the step at 10 ms.
+    float dt = std::min(dtMax, 0.8f * dx / std::max(maxVel, 0.5f));
+    dt = std::clamp(dt, 0.01f, 0.05f);
 
     pool_->parallelFor(N, [&](int b, int e) {
         for (int c = b; c < e; ++c) { Q[c] = 0; Qr[c] = 0; pilot[c] = 0; }

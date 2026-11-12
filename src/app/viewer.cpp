@@ -7,7 +7,11 @@
 #include "scene/scene.h"
 #include "sim/solver.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <mutex>
+#include <thread>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -59,15 +63,23 @@ private:
     Mat4 vp_;
     Vec3 eye_;
     // toggles
-    bool running_ = true, hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = true, upperCut_ = false;
+    std::atomic<bool> running_{true};
+    bool hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = true, upperCut_ = false;
     float cutZ() const { return upperCut_ && sim_->kCeilS.size() > 1 ? sim_->oz + sim_->kCeilS[0] * sim_->dx : 1e9f; }
     RenderOptions ropt_;
-    int source_ = 1, speedIdx_ = 2;
+    int source_ = 1;
+    std::atomic<int> speedIdx_{2};
+    // The solver runs on its own thread; the UI thread takes simMtx_ while it
+    // reads or changes solver state.
+    std::mutex simMtx_;
+    std::thread simThread_;
+    std::atomic<bool> quit_{false};
+    std::atomic<float> simRate_{1.0f};   // achieved / requested speed
+    void simLoop();
     int paintMat_ = -1;
     double lastMesh_ = -1;
     bool meshDirty_ = true;
     int dragButton_ = -1, dragPixels_ = 0;
-    float simBehind_ = 1.0f;
     std::vector<float> vol_;
     std::string hover_;
     std::string demo_;
@@ -79,7 +91,6 @@ private:
     void resetSim();
     void updateCamera();
     void handleInput(float frameDt);
-    void stepSim(float frameDt);
     void buildMeshes();
     void uploadVolume();
     void drawOverlay();
@@ -264,7 +275,7 @@ std::string Viewer::describe(const Hit& h) {
 // ------------------------------------------------------------------ input --
 void Viewer::handleInput(float frameDt) {
     const Input& in = in_;
-    if (in.keyPressed['P'] || in.keyPressed[KEY_PAUSE]) running_ = !running_;
+    if (in.keyPressed['P'] || in.keyPressed[KEY_PAUSE]) running_ = !running_.load();
     if (in.keyPressed['1']) source_ = 0;
     if (in.keyPressed['2']) source_ = 1;
     if (in.keyPressed['3']) source_ = 2;
@@ -278,8 +289,8 @@ void Viewer::handleInput(float frameDt) {
     if (in.keyPressed['H'] || in.keyPressed[KEY_F1]) help_ = !help_;
     if (in.keyPressed[KEY_PAGEUP]) ropt_.sliceZ = std::min(ropt_.sliceZ + 0.2f, scene_.ridgeHeight());
     if (in.keyPressed[KEY_PAGEDOWN]) ropt_.sliceZ = std::max(ropt_.sliceZ - 0.2f, 0.1f);
-    if (in.keyPressed[KEY_PLUS]) speedIdx_ = std::min(speedIdx_ + 1, NSPEED - 1);
-    if (in.keyPressed[KEY_MINUS]) speedIdx_ = std::max(speedIdx_ - 1, 0);
+    if (in.keyPressed[KEY_PLUS]) speedIdx_ = std::min(speedIdx_.load() + 1, NSPEED - 1);
+    if (in.keyPressed[KEY_MINUS]) speedIdx_ = std::max(speedIdx_.load() - 1, 0);
     if (in.keyPressed[KEY_BACKSPACE]) resetSim();
     // ---- fly camera: WASD move, Q/E down/up, Shift fast, Ctrl slow,
     // hold either mouse button and drag to look, wheel moves forward/back
@@ -332,20 +343,37 @@ void Viewer::handleInput(float frameDt) {
     pitch_ = std::clamp(pitch_, -1.55f, 1.55f);
 }
 
-void Viewer::stepSim(float frameDt) {
-    if (!running_ || !sim_) { simBehind_ = 1.0f; return; }
-    float speed = SPEEDS[speedIdx_];
-    float want = std::min(frameDt, 0.1f) * speed;
-    double start = plat_.now();
-    float done = 0;
-    while (done < want) {
-        done += sim_->step(0.05f);
-        if (plat_.now() - start > 0.030) break;
+// Solver thread: steps continuously, paced to the requested speed. "max"
+// runs flat out. The UI thread never waits on a whole frame of solving.
+void Viewer::simLoop() {
+    using clock = std::chrono::steady_clock;
+    auto last = clock::now();
+    double debt = 0;                 // simulated seconds owed to the wall clock
+    double winWall = 0, winSim = 0;  // 1 s window for the achieved-rate readout
+    while (!quit_) {
+        auto now = clock::now();
+        double wall = std::chrono::duration<double>(now - last).count();
+        last = now;
+        float speed = SPEEDS[speedIdx_.load()];
+        bool maxSpeed = speed > 1e8f;
+        if (!running_) { debt = 0; simRate_ = 1.0f; std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+        if (!maxSpeed) debt = std::min(debt + wall * speed, 0.5 * speed + 0.1);
+        winWall += wall;
+        if (!maxSpeed && debt <= 0) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+        float dt;
+        {
+            std::lock_guard<std::mutex> lk(simMtx_);
+            if (!sim_) continue;
+            dt = sim_->step(0.05f);
+        }
+        debt -= dt;
+        winSim += dt;
+        if (winWall > 1.0) {
+            simRate_ = maxSpeed ? (float)(winSim / winWall) : (float)std::min(1.0, winSim / (winWall * speed));
+            winWall = winSim = 0;
+        }
     }
-    simBehind_ = want > 0 ? done / want : 1.0f;
-    if (done > 0) meshDirty_ = meshDirty_ || plat_.now() - lastMesh_ > 0.25;
 }
-
 // ----------------------------------------------------------------- meshes --
 void addQuad(std::vector<Vertex>& v, Vec3 a, Vec3 b, Vec3 c, Vec3 d, Vec3 n, Vec3 col, Vec3 emi) {
     Vec3 q[6] = {a, b, c, a, c, d};
@@ -572,9 +600,10 @@ void Viewer::drawOverlay() {
     ren_.text(x, y, "PHOTON  Phase 1 prototype", 1, 0.85f, 0.4f);
     ren_.text(x + 27 * ren_.glyphW(), y, "PROTOTYPE PHYSICS - NOT VALIDATED - shape roughly right, numbers wrong. Training/education only.", 1, 0.45f, 0.35f);
     y += lh;
-    std::string spd = SPEEDS[speedIdx_] > 1e8f ? "max" : fmt("x%g", SPEEDS[speedIdx_]);
+    std::string spd = SPEEDS[speedIdx_.load()] > 1e8f ? "max" : fmt("x%g", SPEEDS[speedIdx_.load()]);
     std::string line = "t " + mmss(s.time) + "   " + (running_ ? "running [P]" : "PAUSED [P]") + "  speed " + spd;
-    if (running_ && simBehind_ < 0.95f && SPEEDS[speedIdx_] < 1e8f) line += fmt(" (solver at %.2fx of requested)", simBehind_);
+    if (running_ && SPEEDS[speedIdx_.load()] > 1e8f) line += fmt(" (%.2fx realtime)", simRate_.load());
+    else if (running_ && simRate_ < 0.95f) line += fmt(" (solver keeping %.2f of requested speed)", simRate_.load());
     line += "   HRR " + fmt("%.0f kW", s.stats.hrr / 1000) + "   max gas " + fmt("%.0f C", s.stats.maxGasT - 273.15) +
             "   burning cells " + std::to_string(s.stats.burningCells) + "   step " + fmt("%.1f ms", s.stats.stepMs) +
             "   grid " + std::to_string(s.nx) + "x" + std::to_string(s.ny) + "x" + std::to_string(s.nz) + " @ 20 cm";
@@ -628,37 +657,46 @@ void Viewer::drawOverlay() {
 void Viewer::run() {
     double last = plat_.now();
     double lastHover = 0;
+    float lastSimTime = -1;
+    simThread_ = std::thread([this] { simLoop(); });
     while (plat_.pump(in_)) {
         if (in_.keyPressed[KEY_ESCAPE]) break;
         double now = plat_.now();
         float frameDt = (float)(now - last);
         last = now;
-        if (!sim_) break;
-        updateCamera();
-        handleInput(frameDt);
-        if (!sim_) break;
-        updateCamera();
-        stepSim(frameDt);
-        if (meshDirty_) buildMeshes();
-        uploadVolume();
-        ropt_.time = (float)now;
-        ropt_.clipZ = std::min(hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f, cutZ());
-        if (now - lastHover > 0.1) {
-            hover_ = describe(pick(in_.mouseX, in_.mouseY));
-            lastHover = now;
+        bool done = false;
+        {
+            std::lock_guard<std::mutex> lk(simMtx_);
+            if (!sim_) break;
+            updateCamera();
+            handleInput(frameDt);
+            if (!sim_) break;
+            updateCamera();
+            if (sim_->time != lastSimTime && now - lastMesh_ > 0.5) meshDirty_ = true;
+            lastSimTime = sim_->time;
+            if (meshDirty_) buildMeshes();
+            uploadVolume();
+            ropt_.time = (float)now;
+            ropt_.clipZ = std::min(hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f, cutZ());
+            if (now - lastHover > 0.1) {
+                hover_ = describe(pick(in_.mouseX, in_.mouseY));
+                lastHover = now;
+            }
+            drawOverlay();
+            if (!demo_.empty() && shotIdx_ < shots_.size() && sim_->time >= shots_[shotIdx_]) done = true;
         }
-        drawOverlay();
         ren_.render(plat_.width(), plat_.height(), vp_, eye_, ropt_);
         if (in_.keyPressed[KEY_F12])
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
-        if (!demo_.empty() && shotIdx_ < shots_.size() && sim_->time >= shots_[shotIdx_]) {
+        if (done) {
             ren_.saveScreenshot(demo_ + "_" + std::to_string((int)shots_[shotIdx_]) + "s.bmp", plat_.width(), plat_.height());
             if (++shotIdx_ >= shots_.size()) break;
         }
         plat_.swap();
     }
+    quit_ = true;
+    if (simThread_.joinable()) simThread_.join();
 }
-
 } // namespace
 
 int runViewer(const std::string& scenePath, const std::string& demo) {
