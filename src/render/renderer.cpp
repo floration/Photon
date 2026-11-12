@@ -66,6 +66,7 @@ uniform vec3 uEye, uBoxMin, uBoxMax;
 uniform float uStep, uClipZ, uSliceZ, uTMin, uTMax;
 uniform int uSmoke, uSlice, uFire;
 uniform float uTime, uSmokeScale;
+uniform vec3 uSunDir;
 uniform int uNumLights;
 uniform vec4 uLights[8];
 out vec4 o;
@@ -101,6 +102,13 @@ float flameNoise(vec3 p) {
     vec3 q = p * vec3(5.0, 5.0, 2.6) - vec3(0.0, 0.0, uTime * 3.2);
     float n = 0.55 * vnoise(q) + 0.30 * vnoise(q * 2.1 + vec3(0.0, 0.0, -uTime * 2.0)) + 0.15 * vnoise(q * 4.3);
     return n;
+}
+float smokeNoise(vec3 p) {
+    vec3 q = p * 1.6 - vec3(0.0, 0.0, uTime * 0.35);
+    // light domain warp gives curling, rolled edges
+    q += 0.6 * vec3(vnoise(q + vec3(5.2, 1.3, 0.0)), vnoise(q + vec3(1.7, 9.2, 3.1)), vnoise(q + vec3(8.3, 2.8, 4.7))) - 0.3;
+    float n = 0.5 * vnoise(q) + 0.3 * vnoise(q * 2.03 + 1.7) + 0.2 * vnoise(q * 4.1 + 3.3);
+    return smoothstep(0.2, 0.8, n);
 }
 vec3 flameColor(float k) {   // k 0..1: deep red-orange -> orange -> yellow -> pale yellow
     return mix(mix(vec3(0.9, 0.18, 0.02), vec3(1.0, 0.5, 0.08), smoothstep(0.0, 0.4, k)),
@@ -146,10 +154,32 @@ void main() {
             vec3 p = ro + rd * t;
             vec4 v = texture(uVol, (p - uBoxMin) / (uBoxMax - uBoxMin));
             float soot = max(v.r, 0.0), aero = max(v.g, 0.0);
-            float sigma = (8700.0 * soot + 3000.0 * aero) * uSmokeScale;
-            float a = uSmoke == 1 ? 1.0 - exp(-sigma * ds) : 0.0;
+            float sigma0 = (8700.0 * soot + 3000.0 * aero) * uSmokeScale;
+            float sigma = sigma0;
+            float a = 0.0;
             float lightFrac = aero / (soot * 3.0 + aero + 1e-12);
-            vec3 scat = mix(vec3(0.05, 0.05, 0.05), vec3(0.80, 0.78, 0.70), lightFrac);
+            vec3 scat = vec3(0.0);
+            if (uSmoke == 1 && sigma0 > 0.02) {
+                // Display-only sub-grid detail: rolling, billowing structure that
+                // drifts upward. Average density is preserved; the solver's
+                // field sets where and how much smoke there is.
+                float bill = smokeNoise(p);
+                sigma = sigma0 * mix(0.25, 1.75, bill);
+                a = 1.0 - exp(-sigma * ds);
+                // light: sky/ambient, a soft sun term with self-shadowing, and fire light
+                float od = 0.0;
+                for (int sh = 1; sh <= 4; ++sh) {
+                    vec4 sv2 = texture(uVol, (p + uSunDir * (0.35 * float(sh)) - uBoxMin) / (uBoxMax - uBoxMin));
+                    od += (8700.0 * max(sv2.r, 0.0) + 3000.0 * max(sv2.g, 0.0)) * uSmokeScale * 0.35;
+                }
+                float sunT = exp(-od);
+                float g = 0.35, ct = dot(rd, uSunDir);
+                float hg = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * ct, 1.5) * 0.25;
+                vec3 albedo = mix(vec3(0.10, 0.095, 0.09), vec3(0.86, 0.84, 0.78), lightFrac);
+                float amb = 0.45 + 0.25 * clamp((p.z - uBoxMin.z) * 0.15, 0.0, 1.0);
+                scat = albedo * (amb * mix(0.55, 1.0, sunT) + 1.6 * hg * sunT);
+                scat *= mix(0.85, 1.1, bill);   // darker cores, brighter billow tops
+            }
             if (uFire == 1) {   // smoke lit from inside by the fire (display; no radiation transport yet)
                 float alb = mix(0.45, 0.95, lightFrac);
                 vec3 fl = vec3(0.0);
@@ -173,6 +203,7 @@ void main() {
                 emit += glowColor(v.b) * clamp(sigma * 0.6, 0.0, 1.0) * 4.0;
             }
             col += tr * (a * scat + emit * ds);
+            sigma = sigma0;
             tr *= 1.0 - a;
             if (tr < 0.004) break;
         }
@@ -429,6 +460,10 @@ void Renderer::render(int w, int h, const Mat4& vp, const Vec3& eye, const Rende
     glUniform1i(glGetUniformLocation(volProg_, "uFire"), opt.fire ? 1 : 0);
     glUniform1f(glGetUniformLocation(volProg_, "uTime"), opt.time);
     glUniform1f(glGetUniformLocation(volProg_, "uSmokeScale"), opt.smokeScale);
+    {
+        Vec3 sd = normalize(Vec3(0.35f, 0.25f, 0.9f));
+        glUniform3f(glGetUniformLocation(volProg_, "uSunDir"), sd.x, sd.y, sd.z);
+    }
     {
         int nl = opt.fire ? std::min(8, (int)opt.fireLights.size()) : 0;
         glUniform1i(glGetUniformLocation(volProg_, "uNumLights"), nl);
