@@ -39,6 +39,7 @@ add_library(photon_sim STATIC
   src/sim/state.cpp
   src/sim/fds_export.cpp
   src/sim/pressure_mg.cpp
+  src/sim/radiation.cpp
   src/sim/structure.cpp)
 target_link_libraries(photon_sim PUBLIC photon_scene)
 
