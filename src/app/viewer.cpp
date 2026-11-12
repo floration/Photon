@@ -96,6 +96,13 @@ private:
     std::string hover_;
     std::string demo_;
     std::string still_;          // --shot: render a few fixed views, save them, exit (no solving)
+    std::string script_;         // --test-fire: scripted fire with door/window events and captures
+    int scriptStep_ = 0;
+    std::atomic<bool> scriptCapturing_{false};
+    int scriptShot_ = 0, scriptFrame_ = 0;
+    float scriptTime_ = 0;
+    bool scriptDoor1_ = false, scriptDoor2_ = false, scriptWindows_ = false;
+    void runScript(double now, bool& quit);
     int stillFrame_ = 0;
     std::vector<float> shots_ = {20, 75, 150, 240, 330, 420};
     size_t shotIdx_ = 0;
@@ -150,6 +157,7 @@ private:
 
 bool Viewer::init(const std::string& scenePath, const std::string& demo, std::string& err) {
     if (demo.rfind("shot:", 0) == 0) { still_ = demo.substr(5); running_ = false; help_ = false; }
+    else if (demo.rfind("test:", 0) == 0) { script_ = demo.substr(5); help_ = false; showScene_ = false; }
     else demo_ = demo;
     std::string base = exeDir();
     if (!lib_.loadGases(base + "data/gases.txt", err)) return false;
@@ -166,6 +174,11 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     resetSim();
     if (!sim_) { err = "solver build failed"; return false; }
     lookFrom(Vec3(scene_.width * 0.5f + 9.0f, -10.0f, 13.0f), Vec3(scene_.width * 0.5f, scene_.depth * 0.5f, 0.5f));
+    if (!script_.empty()) {
+        hideRoof_ = false;
+        speedIdx_ = NSPEED - 1;
+        igniteItem("Bedroom 1 bed", 100.0f, 300.0f);
+    }
     if (!demo_.empty()) {
         help_ = false;
         speedIdx_ = NSPEED - 1;
@@ -479,6 +492,10 @@ void Viewer::simLoop() {
             if (sim_->time - lastStructT_ >= 0.25f) {   // structure: loads, failures, gravity
                 struct_.update(*sim_, sim_->time - lastStructT_);
                 lastStructT_ = sim_->time;
+            }
+            if (!script_.empty() && !scriptCapturing_) {   // script events land on the exact sim step
+                bool q = false;
+                runScript(0, q);
             }
         }
         debt -= dt;
@@ -1175,7 +1192,39 @@ void Viewer::scanJobs() {
             }
 }
 
-void Viewer::run() {    double last = plat_.now();
+// Scripted test: fire in Bedroom 1 (door open); front door opened at 30 s,
+// back door at 60 s, every window broken out at 80 s; at 30, 60 and 90 s the
+// solver pauses while five views are captured (room with smoke/fire on/off,
+// and outside), then it carries on. Exits after the 90 s captures.
+void Viewer::runScript(double now, bool& quit) {
+    (void)now;
+    (void)quit;
+    Solver& s = *sim_;
+    auto openByName = [&](const std::string& n) {
+        for (size_t o = 0; o < scene_.openings.size(); ++o)
+            if (scene_.openings[o].name == n) { s.toggleOpening((int)o); userToggles_.push_back((int)o); }
+        meshDirty_ = true;
+    };
+    if (!scriptDoor1_ && s.time >= 30.0f) { scriptDoor1_ = true; openByName("Front door"); }
+    if (!scriptDoor2_ && s.time >= 60.0f) { scriptDoor2_ = true; openByName("Back door"); }
+    if (!scriptWindows_ && s.time >= 80.0f) {
+        scriptWindows_ = true;
+        for (size_t o = 0; o < scene_.openings.size(); ++o)
+            if (scene_.openings[o].kind == OpeningKind::Window) s.toggleOpening((int)o);
+        s.addEvent("script-windows", "All windows broken out (test script)");
+        meshDirty_ = true;
+    }
+    const float times[7] = {30.0f, 60.0f, 90.0f, 120.0f, 180.0f, 240.0f, 300.0f};
+    if (!scriptCapturing_ && scriptStep_ < 7 && s.time >= times[scriptStep_]) {
+        scriptCapturing_ = true;
+        running_ = false;
+        scriptShot_ = 0;
+        scriptFrame_ = 0;
+    }
+}
+
+void Viewer::run() {
+    double last = plat_.now();
     double lastHover = 0;
     float lastSimTime = -1;
     simThread_ = std::thread([this] { simLoop(); });
@@ -1216,6 +1265,38 @@ void Viewer::run() {    double last = plat_.now();
         ren_.render(plat_.width(), plat_.height(), vp_, eye_, ro);
         if (in_.keyPressed[KEY_F12])
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
+        if (!script_.empty()) {
+            bool quitNow = false;
+            (void)quitNow;
+            if (scriptCapturing_) {
+                struct V { Vec3 eye, at; bool smoke, fire; const char* tag; } views[5] = {
+                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), true, true, "room_smoke_fire"},
+                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), true, false, "room_smoke_only"},
+                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), false, true, "room_fire_only"},
+                    {Vec3(4.45f, 5.45f, 1.55f), Vec3(2.2f, 7.6f, 0.7f), false, false, "room_clear"},
+                    {Vec3(-7.0f, -6.5f, 4.5f), Vec3(5.5f, 4.5f, 2.2f), true, true, "outside"}};
+                V& vw = views[scriptShot_];
+                if (scriptFrame_ == 0) {
+                    lookFrom(vw.eye, vw.at);
+                    ropt_.smoke = vw.smoke;
+                    ropt_.fire = vw.fire;
+                    meshDirty_ = true;
+                }
+                if (++scriptFrame_ == 4) {
+                    static const int kT[7] = {30, 60, 90, 120, 180, 240, 300}; int t = kT[scriptStep_];
+                    ren_.saveScreenshot(script_ + "_" + std::to_string(t) + "s_" + vw.tag + ".bmp", plat_.width(), plat_.height());
+                    scriptFrame_ = 0;
+                    if (++scriptShot_ >= 5) {
+                        scriptCapturing_ = false;
+                        ++scriptStep_;
+                        ropt_.smoke = ropt_.fire = true;
+                        if (scriptStep_ >= 7) break;
+                        running_ = true;
+                    }
+                }
+            }
+            (void)quitNow;
+        }
         if (!still_.empty()) {
             ++stillFrame_;
             struct View { Vec3 eye, at; bool roofHidden; int stage; bool cut; } views[10] = {
