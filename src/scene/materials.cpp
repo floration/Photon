@@ -7,11 +7,31 @@ static std::string where(const TextFile& f, const TextLine& l) {
     return f.path + ":" + std::to_string(l.number) + ": ";
 }
 
+// Every data file starts with "<magic> <version>"; newer versions are refused
+// with a clear message instead of being misread.
+static bool checkHeader(const TextFile& f, const char* magic, int supported, std::string& err) {
+    if (f.lines.empty() || f.lines[0].tok[0] != magic || f.lines[0].tok.size() < 2) {
+        err = f.path + ": missing '" + std::string(magic) + " <version>' header";
+        return false;
+    }
+    bool ok;
+    int v = (int)toNumber(f.lines[0].tok[1], ok);
+    if (!ok || v < 1) { err = f.path + ": bad version"; return false; }
+    if (v > supported) {
+        err = f.path + ": format version " + std::to_string(v) + " is newer than this build supports (" +
+              std::to_string(supported) + "); update Photon";
+        return false;
+    }
+    return true;
+}
+
 bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
     TextFile f;
     if (!f.load(path, err)) return false;
+    if (!checkHeader(f, "photon_materials", MATERIALS_VERSION, err)) return false;
     Material* cur = nullptr;
-    for (const TextLine& l : f.lines) {
+    for (size_t li = 1; li < f.lines.size(); ++li) {
+        const TextLine& l = f.lines[li];
         const std::string& k = l.tok[0];
         auto num = [&](int i, float& out) -> bool {
             if ((int)l.tok.size() <= i) { err = where(f, l) + "missing value for " + k; return false; }
@@ -59,8 +79,10 @@ bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
 bool MaterialLibrary::loadAssemblies(const std::string& path, std::string& err) {
     TextFile f;
     if (!f.load(path, err)) return false;
+    if (!checkHeader(f, "photon_assemblies", ASSEMBLIES_VERSION, err)) return false;
     Assembly* cur = nullptr;
-    for (const TextLine& l : f.lines) {
+    for (size_t li = 1; li < f.lines.size(); ++li) {
+        const TextLine& l = f.lines[li];
         const std::string& k = l.tok[0];
         bool ok = true;
         if (k == "assembly") {
@@ -102,6 +124,32 @@ bool MaterialLibrary::loadAssemblies(const std::string& path, std::string& err) 
         return false;
     }
     return true;
+}
+
+bool MaterialLibrary::loadComponents(const std::string& path, std::string& err) {
+    TextFile f;
+    if (!f.load(path, err)) return false;
+    if (!checkHeader(f, "photon_components", COMPONENTS_VERSION, err)) return false;
+    for (size_t li = 1; li < f.lines.size(); ++li) {
+        const TextLine& l = f.lines[li];
+        if (l.tok[0] != "component" || l.tok.size() < 5) { err = where(f, l) + "component <id> <thickness_in> <width_in> \"name\" [source \"...\"]"; return false; }
+        Component c;
+        bool ok1, ok2;
+        c.id = l.tok[1];
+        c.thickness = (float)toNumber(l.tok[2], ok1) * 0.0254f;
+        c.width = (float)toNumber(l.tok[3], ok2) * 0.0254f;
+        if (!ok1 || !ok2) { err = where(f, l) + "bad number"; return false; }
+        c.name = l.tok[4];
+        if (l.tok.size() >= 7 && l.tok[5] == "source") c.source = l.tok[6];
+        if (c.source.empty()) { err = where(f, l) + "component needs a source"; return false; }
+        components.push_back(c);
+    }
+    return true;
+}
+
+const Component* MaterialLibrary::component(const std::string& id) const {
+    for (const Component& c : components) if (c.id == id) return &c;
+    return nullptr;
 }
 
 int MaterialLibrary::findMaterial(const std::string& id) const {

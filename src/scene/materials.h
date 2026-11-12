@@ -44,12 +44,24 @@ struct Assembly {
     std::string source;
 };
 
+// A standard component at its actual size (from data/components.txt).
+struct Component {
+    std::string id, name, source;
+    float thickness = 0, width = 0;   // m
+};
+
+// Versioned text formats: each file starts with "photon_<kind> <version>".
+constexpr int MATERIALS_VERSION = 1, ASSEMBLIES_VERSION = 1, COMPONENTS_VERSION = 1, SCENE_VERSION = 1;
+
 struct MaterialLibrary {
     std::vector<Material> materials;
     std::vector<Assembly> assemblies;
+    std::vector<Component> components;
 
     bool loadMaterials(const std::string& path, std::string& err);
     bool loadAssemblies(const std::string& path, std::string& err);
+    bool loadComponents(const std::string& path, std::string& err);
+    const Component* component(const std::string& id) const;
     int findMaterial(const std::string& id) const;
     int findAssembly(const std::string& id) const;
     float arealMass(const Layer& l) const;

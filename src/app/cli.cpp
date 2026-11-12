@@ -21,7 +21,8 @@ int main(int argc, char** argv) {
 
     MaterialLibrary lib;
     std::string err;
-    if (!lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err)) {
+    if (!lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err) ||
+        !lib.loadComponents("data/components.txt", err)) {
         std::fprintf(stderr, "data: %s\n", err.c_str());
         return 1;
     }

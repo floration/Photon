@@ -10,7 +10,7 @@ namespace photon {
 
 namespace {
 constexpr float FT = 0.3048f;
-constexpr float SHEET_W = 4 * FT, SHEET_L = 8 * FT;   // standard 4 x 8 ft panel (ASTM C1396 / PS 2)
+float SHEET_W = 4 * FT, SHEET_L = 8 * FT;   // standard 4 x 8 ft panel; from data/components.txt
 
 void cross3(const float a[3], const float b[3], float o[3]) {
     o[0] = a[1] * b[2] - a[2] * b[1];
@@ -63,6 +63,7 @@ float Scene::layerOffset(const MaterialLibrary& lib, const Assembly& a, int laye
 
 void Scene::generateObjects(const MaterialLibrary& lib) {
     objects.clear();
+    if (const Component* c = lib.component("sheet_4x8")) { SHEET_W = c->thickness; SHEET_L = c->width; }
     auto add = [&](const std::string& name, const std::string& kind, int mat, int story, const float c[3],
                    const float u[3], const float v[3], float hu, float hv, float hn) -> SceneObject& {
         SceneObject o;

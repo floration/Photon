@@ -47,6 +47,7 @@ struct World {
     bool ok = false;
     World() {
         ok = lib.loadMaterials("data/materials.txt", err) && lib.loadAssemblies("data/assemblies.txt", err) &&
+             lib.loadComponents("data/components.txt", err) &&
              scene.load("scenes/model_home.txt", lib, err);
     }
 };
@@ -93,6 +94,21 @@ TEST(materials_have_sources) {
         CHECK_MSG(m.density > 0 && m.conductivity > 0 && m.specificHeat > 0, m.id);
         if (m.combustible) CHECK_MSG(m.heatOfGasification > 0 && m.heatOfCombustion > 0, m.id);
     }
+}
+
+TEST(format_versions) {
+    const char* path = "photon_test_ver.txt";
+    { std::ofstream f(path); f << "photon_materials 99\n"; }
+    MaterialLibrary lib;
+    std::string err;
+    CHECK(!lib.loadMaterials(path, err));
+    CHECK(err.find("newer") != std::string::npos);
+    { std::ofstream f(path); f << "material x\nend\n"; }
+    CHECK(!lib.loadMaterials(path, err));      // header required
+    std::remove(path);
+    World& w = world();
+    CHECK(w.lib.component("lumber_2x4") && std::fabs(w.lib.component("lumber_2x4")->width - 3.5f * 0.0254f) < 1e-6f);
+    for (const Component& c : w.lib.components) CHECK_MSG(!c.source.empty(), c.id);
 }
 
 TEST(assemblies_resolve) {

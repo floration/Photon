@@ -119,6 +119,7 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     std::string base = exeDir();
     if (!lib_.loadMaterials(base + "data/materials.txt", err)) return false;
     if (!lib_.loadAssemblies(base + "data/assemblies.txt", err)) return false;
+    if (!lib_.loadComponents(base + "data/components.txt", err)) return false;
     std::string sp = scenePath;
     if (sp.find(':') == std::string::npos && sp.rfind('/', 0) != 0) sp = base + sp;
     if (!scene_.load(sp, lib_, err)) return false;

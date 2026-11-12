@@ -1,0 +1,15 @@
+photon_components 1
+# Photon component library: actual (not nominal) sizes of standard building
+# components. Inches. Every entry names its standard; status in
+# docs/DATA_REGISTER.md.
+#
+#   component <id> <thickness_in> <width_in> "<name>" source "<standard>"
+
+component lumber_2x4   1.5   3.5   "2x4 dimension lumber, dry dressed"       source "NIST PS 20 American Softwood Lumber Standard, Table 3 (verify)"
+component lumber_2x6   1.5   5.5   "2x6 dimension lumber, dry dressed"       source "NIST PS 20, Table 3 (verify)"
+component lumber_2x8   1.5   7.25  "2x8 dimension lumber, dry dressed"       source "NIST PS 20, Table 3 (verify)"
+component lumber_2x10  1.5   9.25  "2x10 dimension lumber, dry dressed"      source "NIST PS 20, Table 3 (verify)"
+component board_1x6    0.75  5.5   "1x6 board, dry dressed"                  source "NIST PS 20, Table 3 (verify)"
+component sheet_4x8    48    96    "Standard sheet good, 4 x 8 ft"           source "ASTM C1396 (gypsum board) / PS 2 (OSB) standard panel size (verify)"
+component truss_plate  0.036 4     "Metal connector plate, 20 gauge"         source "ANSI/TPI 1 minimum gauge (verify)"
+component stair_tread  1.0   10    "Stair tread, 1 in nominal, 10 in run"     source "IRC R311.7.5.2 minimum tread depth 10 in (verify)"

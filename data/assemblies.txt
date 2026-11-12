@@ -1,3 +1,4 @@
+photon_assemblies 1
 # Photon layered assemblies - Phase 1 component set for the model home.
 #
 #   layer <material> <thickness_m> [fill <volume fraction>] [r <m2K/W>]

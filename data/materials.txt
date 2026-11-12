@@ -1,3 +1,4 @@
+photon_materials 1
 # Photon material library - Phase 1 prototype set.
 #
 # Units: SI. Temperatures in kelvin.

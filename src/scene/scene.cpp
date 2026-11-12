@@ -10,16 +10,17 @@ namespace {
 // Standard, NIST Voluntary Product Standard PS 20 (2x4 = 1-1/2 x 3-1/2 in,
 // 2x8 = 1-1/2 x 7-1/4 in, 2x10 = 1-1/2 x 9-1/4 in). See docs/DATA_REGISTER.md.
 constexpr float IN = 0.0254f;
-constexpr float T2X = 1.5f * IN;        // 2x thickness
-constexpr float D2X4 = 3.5f * IN;
-constexpr float D2X8 = 7.25f * IN;
+// Defaults; replaced from data/components.txt when the library has it.
+float T2X = 1.5f * IN;        // 2x thickness
+float D2X4 = 3.5f * IN;
+float D2X8 = 7.25f * IN;
 // Metal connector plate for wood trusses: 20 gauge galvanized steel is the
 // common minimum (ANSI/TPI 1); 0.036 in nominal. To verify, see register.
-constexpr float GUSSET_T = 0.036f * IN;
+float GUSSET_T = 0.036f * IN;
 // Stair treads: 1 in nominal (3/4 in actual) is typical; IRC R311.7.5 limits
 // risers to 7-3/4 in and requires treads of at least 10 in.
-constexpr float TREAD_T = 1.0f * IN;
-constexpr float TREAD_RUN = 10.0f * IN;
+float TREAD_T = 1.0f * IN;
+float TREAD_RUN = 10.0f * IN;
 
 std::string where(const TextFile& f, const TextLine& l) { return f.path + ":" + std::to_string(l.number) + ": "; }
 } // namespace
@@ -66,7 +67,13 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
             if (out < 0) { err = where(f, l) + "unknown assembly '" + t[i] + "'"; return false; }
             return true;
         };
-        if (k == "photon_scene") { header = true; continue; }
+        if (k == "photon_scene") {
+            bool okv;
+            int ver = t.size() > 1 ? (int)toNumber(t[1], okv) : 0;
+            if (ver < 1 || ver > SCENE_VERSION) { err = where(f, l) + "scene format version " + (t.size() > 1 ? t[1] : std::string("?")) + " not supported (this build reads " + std::to_string(SCENE_VERSION) + ")"; return false; }
+            header = true;
+            continue;
+        }
         if (!header) { err = where(f, l) + "file must start with 'photon_scene <version>'"; return false; }
 
         if (item) {
@@ -238,6 +245,10 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
 
 void Scene::generateFraming(const MaterialLibrary& lib) {
     members.clear();
+    if (const Component* c = lib.component("lumber_2x4")) { T2X = c->thickness; D2X4 = c->width; }
+    if (const Component* c = lib.component("lumber_2x8")) D2X8 = c->width;
+    if (const Component* c = lib.component("truss_plate")) GUSSET_T = c->thickness;
+    if (const Component* c = lib.component("stair_tread")) { TREAD_T = c->thickness; TREAD_RUN = c->width; }
     auto add = [&](MemberKind kind, int m, float ax, float ay, float az, float bx, float by, float bz,
                    float sx, float sy, float sz, float w, float d) {
         Member mb;
@@ -393,7 +404,6 @@ void Scene::generateFraming(const MaterialLibrary& lib) {
                     GUSSET_T, 0.10f);
             }
     }
-    (void)lib;
 }
 
 } // namespace photon
