@@ -3,16 +3,105 @@
 //
 //   photon_cli [scene] [seconds] [items to ignite, comma separated] [power_kW] [max wall seconds]
 #include "scene/materials.h"
+#include "scene/textfile.h"
 #include "scene/scene.h"
 #include "sim/solver.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
+#include <thread>
 
 using namespace photon;
 
+// ---------------------------------------------------------------------------
+// Background job mode:  photon_cli --job <file.job>
+// The viewer writes the job file; this process runs it at low priority and
+// reports through <file>.status. Writing "pause", "resume" or "cancel" into
+// <file>.control steers it. Results go to <file>.csv and <file>.events.txt.
+static int runJob(const std::string& jobPath) {
+    auto status = [&](const std::string& state, const Solver* s, double wall) {
+        std::ofstream f(jobPath + ".status.tmp");
+        f << "state " << state << "\n";
+        if (s) {
+            f << "sim_time " << s->time << "\nwall " << wall << "\nhrr_kw " << s->stats.hrr / 1000
+              << "\nmax_c " << s->stats.maxGasT - 273.15f << "\nevents " << s->events.size() << "\n";
+        }
+        f.close();
+        std::remove((jobPath + ".status").c_str());
+        std::rename((jobPath + ".status.tmp").c_str(), (jobPath + ".status").c_str());
+    };
+    TextFile jf;
+    std::string err;
+    if (!jf.load(jobPath, err) || jf.lines.empty() || jf.lines[0].tok[0] != "photon_job") {
+        status("failed: cannot read job file", nullptr, 0);
+        return 1;
+    }
+    std::string scenePath = "scenes/model_home.txt";
+    float duration = 600;
+    int threads = std::max(1, (int)std::thread::hardware_concurrency() / 2);
+    struct Ign { int cell; float power, dur; std::string label; };
+    std::vector<Ign> igns;
+    std::vector<int> toggles;
+    bool ok = true;
+    for (size_t i = 1; i < jf.lines.size(); ++i) {
+        const auto& t = jf.lines[i].tok;
+        if (t[0] == "scene" && t.size() > 1) scenePath = t[1];
+        else if (t[0] == "duration" && t.size() > 1) duration = (float)toNumber(t[1], ok);
+        else if (t[0] == "threads" && t.size() > 1) threads = (int)toNumber(t[1], ok);
+        else if (t[0] == "ignite" && t.size() > 4)
+            igns.push_back({(int)toNumber(t[1], ok), (float)toNumber(t[2], ok), (float)toNumber(t[3], ok), t[4]});
+        else if (t[0] == "toggle" && t.size() > 1) toggles.push_back((int)toNumber(t[1], ok));
+    }
+    MaterialLibrary lib;
+    Scene scene;
+    if (!lib.loadMaterials("data/materials.txt", err) || !lib.loadAssemblies("data/assemblies.txt", err) ||
+        !lib.loadComponents("data/components.txt", err) || !scene.load(scenePath, lib, err)) {
+        status("failed: " + err, nullptr, 0);
+        return 1;
+    }
+    Solver sim(threads);
+    if (!sim.build(scene, lib, err)) { status("failed: " + err, nullptr, 0); return 1; }
+    for (int o : toggles) sim.toggleOpening(o);
+    for (const Ign& g : igns) sim.addIgnition(g.cell, g.power, g.dur, g.label);
+    std::ofstream csv(jobPath + ".csv");
+    csv << "# PROTOTYPE PHYSICS - NOT VALIDATED\ntime_s,hrr_kw,max_gas_c,burning_cells,pyrolysis_kg_s\n";
+    auto t0 = std::chrono::steady_clock::now();
+    auto lastStatus = t0;
+    float nextRow = 0;
+    bool paused = false;
+    std::string state = "running";
+    while (sim.time < duration) {
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration<double>(now - lastStatus).count() > 0.5) {
+            lastStatus = now;
+            std::ifstream ctl(jobPath + ".control");
+            std::string cmd;
+            if (ctl >> cmd) {
+                if (cmd == "pause") paused = true;
+                else if (cmd == "resume") paused = false;
+                else if (cmd == "cancel") { state = "cancelled"; break; }
+            }
+            status(paused ? "paused" : "running", &sim, std::chrono::duration<double>(now - t0).count());
+        }
+        if (paused) { std::this_thread::sleep_for(std::chrono::milliseconds(200)); continue; }
+        sim.step(0.05f);
+        if (sim.time >= nextRow) {
+            nextRow += 1.0f;
+            csv << sim.time << "," << sim.stats.hrr / 1000 << "," << sim.stats.maxGasT - 273.15f << ","
+                << sim.stats.burningCells << "," << sim.stats.pyrolysis << "\n";
+        }
+    }
+    std::ofstream ev(jobPath + ".events.txt");
+    for (const SimEvent& e : sim.events) ev << e.time << "\t" << e.text << "\n";
+    if (state == "running") state = "done";
+    status(state, &sim, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc > 2 && std::string(argv[1]) == "--job") return runJob(argv[2]);
     std::string scenePath = argc > 1 ? argv[1] : "scenes/model_home.txt";
     float seconds = argc > 2 ? (float)std::atof(argv[2]) : 300.0f;
     std::string target = argc > 3 ? argv[3] : "Sofa";

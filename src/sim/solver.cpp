@@ -40,6 +40,7 @@ const char* barrierKindName(BarrierKind k) {
 
 // Leave two hardware threads for the viewer's UI/render thread and the OS.
 Solver::Solver() : pool_(std::make_unique<JobPool>(std::max(1, (int)std::thread::hardware_concurrency() - 2))) {}
+Solver::Solver(int threads) : pool_(std::make_unique<JobPool>(std::max(1, threads))) {}
 Solver::~Solver() = default;
 
 int Solver::cellAt(float x, float y, float z) const {

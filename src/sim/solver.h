@@ -142,6 +142,7 @@ public:
     long phaseSteps = 0;
 
     Solver();
+    explicit Solver(int threads);   // background jobs use fewer threads
     ~Solver();
 
 private:

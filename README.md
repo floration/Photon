@@ -2,7 +2,7 @@
 
 A house fire simulator for firefighter training, written in raw C++20 with OpenGL. No engine and no framework, and no third-party libraries.
 
-**Status: Phase 1 prototype.** It uses prototype physics and is not validated. The fire behaves roughly right in shape and wrong in numbers. Use it for training and education only. Read [docs/PROTOTYPE_PHYSICS.md](docs/PROTOTYPE_PHYSICS.md) for what is simplified.
+**Status: Phase 2 (foundations) on top of the Phase 1 prototype. Windows only for now.** It uses prototype physics and is not validated. The fire behaves roughly right in shape and wrong in numbers. Use it for training and education only. Read [docs/PROTOTYPE_PHYSICS.md](docs/PROTOTYPE_PHYSICS.md) for what is simplified.
 
 ## What Phase 1 does
 
@@ -21,6 +21,14 @@ A house fire simulator for firefighter training, written in raw C++20 with OpenG
   - Hot surfaces that glow by their temperature.
   - Cutaway toggles, a framing view and a temperature slice.
   - An event log ("Living south window failed", "Ceiling opened over Living - fire into attic").
+
+## Phase 2 additions
+
+- **Object-based house.** The scene expands into about 3,000 physical objects: every framing member, standard 4 x 8 ft gypsum and OSB sheets, subfloor and roof-deck panels, shingle fields, door slabs, window units, floor coverings and furniture parts, each at its true size. Walls are drawn with real thickness at their true layer positions, and the roof as a true slope.
+- **UI.** A scene panel (G) with click action, ignition source, simulation controls, view toggles, doors and windows, and rooms. An object inspector (Ctrl+click) shows dimensions, the material properties and their citation, and the live state.
+- **Background runs.** "Queue this fire as a background run" writes `jobs/runN.job`. A separate low-priority `photon_cli --job` process runs it on half the cores, with pause, resume and cancel from the panel. Results go to `runN.job.csv` and `runN.job.events.txt`. Nothing heavy starts unless you queue it.
+- **Versioned data formats.** `data/materials.txt`, `assemblies.txt`, `components.txt` and scene files all start with a format version, and newer versions are refused with a clear message. The component library holds actual standard sizes with citations.
+- **Tests.** `build\photon_tests.exe` runs in about 2 s. It covers the formats, scene and objects, grid invariants, smoke containment, determinism and the burner.
 
 ## Build (Windows)
 

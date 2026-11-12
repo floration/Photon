@@ -101,6 +101,23 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 void showMessage(const char* title, const std::string& text) { MessageBoxA(nullptr, text.c_str(), title, MB_OK | MB_ICONERROR); }
 
+bool spawnBackground(const std::string& exe, const std::string& args, const std::string& workDir) {
+    std::string cmd = "\"" + exe + "\" " + args;
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = {};
+    std::string mutableCmd = cmd;
+    BOOL ok = CreateProcessA(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE,
+                             BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr,
+                             workDir.empty() ? nullptr : workDir.c_str(), &si, &pi);
+    if (!ok) return false;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
 std::string exeDir() {
     char buf[MAX_PATH];
     DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);

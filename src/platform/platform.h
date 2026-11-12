@@ -51,6 +51,8 @@ private:
 
 // Shows a blocking message box (errors before / outside the GL window).
 void showMessage(const char* title, const std::string& text);
+// Starts a detached process at low priority (background jobs). Returns false on failure.
+bool spawnBackground(const std::string& exe, const std::string& args, const std::string& workDir);
 // Directory containing the running executable, with trailing separator.
 std::string exeDir();
 

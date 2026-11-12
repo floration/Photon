@@ -14,6 +14,8 @@
 #include <mutex>
 #include <thread>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -103,6 +105,14 @@ private:
     bool haveSel_ = false;
     struct SelHit { int kind = 0, cell = -1, from = -1, barrier = -1; Vec3 pos; } sel_;
     int selObj_ = -1;
+    // background runs (photon_cli --job), one at a time, low priority
+    struct JobInfo { std::string path, name, state; float simTime = 0, duration = 600, hrr = 0; };
+    std::vector<JobInfo> jobs_;
+    double lastJobScan_ = -10;
+    std::vector<int> userToggles_;   // openings the user changed since reset
+    void scanJobs();
+    void queueJob();
+    void toggleOpeningUser(int op) { sim_->toggleOpening(op); userToggles_.push_back(op); meshDirty_ = true; }
     void buildMeshes();
     void uploadVolume();
     void drawOverlay();
@@ -158,6 +168,7 @@ void Viewer::igniteItem(const std::string& name, float kw, float seconds) {
 }
 
 void Viewer::resetSim() {
+    userToggles_.clear();
     sim_ = std::make_unique<Solver>();
     std::string err;
     if (!sim_->build(scene_, lib_, err)) { showMessage("Photon", "Solver build failed: " + err); sim_.reset(); return; }
@@ -400,7 +411,7 @@ void Viewer::handleInput(float frameDt) {
                     }
                 } else if (dragButton_ == 1 && h.kind == 3) {
                     int op = sim_->barriers[h.barrier].opening;
-                    if (op >= 0) { sim_->toggleOpening(op); meshDirty_ = true; }
+                    if (op >= 0) toggleOpeningUser(op);
                 }
             }
             dragButton_ = -1;
@@ -836,6 +847,23 @@ void Viewer::drawPanels() {
         ui_.checkbox("Smoke  [X]", ropt_.smoke);
         ui_.checkbox("Fire  [V]", ropt_.fire);
         ui_.checkbox("Temperature slice  [T]", ropt_.slice);
+        ui_.heading("Background runs");
+        ui_.label("Runs the current fire for 10 sim-minutes in a", 0.7f, 0.7f, 0.7f);
+        ui_.label("separate low-priority process (half the cores).", 0.7f, 0.7f, 0.7f);
+        if (ui_.button(s.ignitions.empty() ? "Queue run (start a fire first)" : "Queue this fire as a background run")) {
+            if (!s.ignitions.empty()) queueJob();
+        }
+        for (JobInfo& j : jobs_) {
+            ui_.label(j.name + ": " + j.state + "  " + fmt("%.0f", j.simTime) + "/" + fmt("%.0f s", j.duration) +
+                      (j.hrr > 0 ? "  " + fmt("%.0f kW", j.hrr) : std::string("")), 0.85f, 0.95f, 0.8f);
+            bool live = j.state == "running" || j.state == "paused";
+            if (live) {
+                if (ui_.button(j.state == "paused" ? "Resume" : "Pause", false, 12)) {
+                    std::ofstream(j.path + ".control") << (j.state == "paused" ? "resume" : "pause");
+                }
+                if (ui_.button("Cancel", false, 12)) std::ofstream(j.path + ".control") << "cancel";
+            }
+        }
         ui_.heading("Doors and windows");
         for (size_t o = 0; o < scene_.openings.size(); ++o) {
             const Opening& op = scene_.openings[o];
@@ -845,7 +873,7 @@ void Viewer::drawPanels() {
                 if (b.opening == (int)o) { any = true; open = open || b.userOpen || b.failed; }
             if (!any) continue;
             std::string st = op.kind == OpeningKind::Door ? (open ? "open" : "closed") : (open ? "broken/out" : "intact");
-            if (ui_.button(op.name + "  (" + st + ")", open, 6)) { s.toggleOpening((int)o); meshDirty_ = true; }
+            if (ui_.button(op.name + "  (" + st + ")", open, 6)) toggleOpeningUser((int)o);
         }
         ui_.heading("Rooms (click to fly there)");
         for (int st = 0; st < scene_.stories; ++st) {
@@ -906,8 +934,62 @@ void Viewer::drawPanels() {
     }
 }
 
-void Viewer::run() {
-    double last = plat_.now();
+void Viewer::queueJob() {
+    namespace fs = std::filesystem;
+    std::string dir = exeDir() + "jobs/";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    int n = 1;
+    while (fs::exists(dir + "run" + std::to_string(n) + ".job")) ++n;
+    std::string path = dir + "run" + std::to_string(n) + ".job";
+    std::ofstream f(path);
+    f << "photon_job 1\nscene scenes/model_home.txt\nduration 600\nthreads "
+      << std::max(1u, std::thread::hardware_concurrency() / 2) << "\n";
+    for (int o : userToggles_) f << "toggle " << o << "\n";
+    for (const Ignition& ig : sim_->ignitions)
+        f << "ignite " << ig.cell << " " << ig.power << " " << ig.duration << " \"" << ig.label << "\"\n";
+    f.close();
+    lastJobScan_ = -10;   // start it on the next scan if nothing else is running
+}
+
+void Viewer::scanJobs() {
+    namespace fs = std::filesystem;
+    std::string dir = exeDir() + "jobs/";
+    jobs_.clear();
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return;
+    std::vector<std::string> files;
+    for (const auto& e : fs::directory_iterator(dir, ec))
+        if (e.path().extension() == ".job") files.push_back(e.path().string());
+    std::sort(files.begin(), files.end());
+    bool busy = false;
+    for (const std::string& p : files) {
+        JobInfo j;
+        j.path = p;
+        j.name = fs::path(p).stem().string();
+        j.state = "queued";
+        std::ifstream st(p + ".status");
+        std::string k;
+        while (st >> k) {
+            if (k == "state") { std::getline(st, j.state); j.state.erase(0, j.state.find_first_not_of(' ')); }
+            else if (k == "sim_time") st >> j.simTime;
+            else if (k == "hrr_kw") st >> j.hrr;
+            else { std::string rest; std::getline(st, rest); }
+        }
+        if (j.state == "running" || j.state == "paused" || j.state == "starting") busy = true;
+        jobs_.push_back(j);
+    }
+    if (!busy)
+        for (JobInfo& j : jobs_)
+            if (j.state == "queued") {
+                std::ofstream(j.path + ".status") << "state starting\n";
+                spawnBackground(exeDir() + "photon_cli.exe", "--job \"" + j.path + "\"", exeDir());
+                j.state = "starting";
+                break;
+            }
+}
+
+void Viewer::run() {    double last = plat_.now();
     double lastHover = 0;
     float lastSimTime = -1;
     simThread_ = std::thread([this] { simLoop(); });
@@ -923,6 +1005,7 @@ void Viewer::run() {
             uiWants_ = false;
             if (!sim_) break;
             updateCamera();
+            if (now - lastJobScan_ > 1.0) { scanJobs(); lastJobScan_ = now; }
             ui_.begin(&ren_, &in_);
             drawPanels();
             handleInput(frameDt);
