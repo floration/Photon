@@ -256,12 +256,12 @@ std::string Viewer::describe(const Hit& h) {
 // ------------------------------------------------------------------ input --
 void Viewer::handleInput(float frameDt) {
     const Input& in = in_;
-    if (in.keyPressed[KEY_SPACE]) running_ = !running_;
+    if (in.keyPressed['P'] || in.keyPressed[KEY_PAUSE]) running_ = !running_;
     if (in.keyPressed['1']) source_ = 0;
     if (in.keyPressed['2']) source_ = 1;
     if (in.keyPressed['3']) source_ = 2;
     if (in.keyPressed['R'] || in.keyPressed[KEY_F2]) { hideRoof_ = !hideRoof_; meshDirty_ = true; }
-    if (in.keyPressed['C'] || in.keyPressed[KEY_F3]) { hideCeiling_ = !hideCeiling_; meshDirty_ = true; }
+    if (in.keyPressed['Z'] || in.keyPressed[KEY_F3]) { hideCeiling_ = !hideCeiling_; meshDirty_ = true; }
     if (in.keyPressed['F'] || in.keyPressed[KEY_F4]) { framing_ = !framing_; meshDirty_ = true; }
     if (in.keyPressed['X'] || in.keyPressed[KEY_F5]) ropt_.smoke = !ropt_.smoke;
     if (in.keyPressed['V']) ropt_.fire = !ropt_.fire;
@@ -288,8 +288,8 @@ void Viewer::handleInput(float frameDt) {
     if (in.keyDown['S']) move += fwd * -1;
     if (in.keyDown['D']) move += right;
     if (in.keyDown['A']) move += right * -1;
-    if (in.keyDown['E']) move += Vec3(0, 0, 1);
-    if (in.keyDown['Q']) move += Vec3(0, 0, -1);
+    if (in.keyDown['E'] || in.keyDown[KEY_SPACE]) move += Vec3(0, 0, 1);
+    if (in.keyDown['Q'] || in.keyDown['C']) move += Vec3(0, 0, -1);
     if (length(move) > 0) eye_ += normalize(move) * (speed * dt);
     if (in.wheel != 0) eye_ += fwd * (in.wheel * 0.6f * (in.keyDown[KEY_SHIFT] ? 4.0f : 1.0f));
     eye_.z = std::max(eye_.z, 0.15f);
@@ -513,7 +513,7 @@ void Viewer::drawOverlay() {
     ren_.text(x + 27 * ren_.glyphW(), y, "PROTOTYPE PHYSICS - NOT VALIDATED - shape roughly right, numbers wrong. Training/education only.", 1, 0.45f, 0.35f);
     y += lh;
     std::string spd = SPEEDS[speedIdx_] > 1e8f ? "max" : fmt("x%g", SPEEDS[speedIdx_]);
-    std::string line = "t " + mmss(s.time) + "   " + (running_ ? "running" : "PAUSED") + "  speed " + spd;
+    std::string line = "t " + mmss(s.time) + "   " + (running_ ? "running [P]" : "PAUSED [P]") + "  speed " + spd;
     if (running_ && simBehind_ < 0.95f && SPEEDS[speedIdx_] < 1e8f) line += fmt(" (solver at %.2fx of requested)", simBehind_);
     line += "   HRR " + fmt("%.0f kW", s.stats.hrr / 1000) + "   max gas " + fmt("%.0f C", s.stats.maxGasT - 273.15) +
             "   burning cells " + std::to_string(s.stats.burningCells) + "   step " + fmt("%.1f ms", s.stats.stepMs) +
@@ -521,7 +521,7 @@ void Viewer::drawOverlay() {
     ren_.text(x, y, line);
     y += lh;
     std::string tog = std::string("Source [1-3]: ") + SOURCES[source_].name + "   roof " + (hideRoof_ ? "hidden" : "shown") +
-                      " [R]  ceiling " + (hideCeiling_ ? "hidden" : "shown") + " [C]  framing " + (framing_ ? "on" : "off") +
+                      " [R]  ceiling " + (hideCeiling_ ? "hidden" : "shown") + " [Z]  framing " + (framing_ ? "on" : "off") +
                       " [F]  smoke " + (ropt_.smoke ? "on" : "off") + " [X]  fire " + (ropt_.fire ? "on" : "off") + " [V]  temp slice " +
                       (ropt_.slice ? fmt("%.1f m", ropt_.sliceZ) : std::string("off")) + " [T, PgUp/PgDn]";
     ren_.text(x, y, tog, 0.8f, 0.9f, 1.0f);
@@ -545,8 +545,8 @@ void Viewer::drawOverlay() {
         const char* lines[] = {
             "Left-click a surface        start a fire with the selected source (solver decides if it ignites)",
             "Right-click a door/window   open or close a door, break a window",
-            "WASD move  Q/E down/up  Shift fast  Ctrl slow   hold mouse + drag  look   wheel  dolly   arrows  turn",
-            "Space  pause   +/-  speed   R roof  C ceiling  F framing  X smoke  V fire  T slice   Backspace reset   H help",
+            "WASD move  Space/C up/down (or E/Q)  Shift fast  Ctrl slow   hold mouse + drag  look   wheel  dolly   arrows  turn",
+            "P  pause   +/-  speed   R roof  Z ceiling  F framing  X smoke  V fire  T slice   Backspace reset   H help",
             "Doors and windows start as in the scene file. Closed house fires can starve for oxygen.",
         };
         float hy = lh * 3 + 24;
@@ -588,7 +588,7 @@ void Viewer::run() {
         }
         drawOverlay();
         ren_.render(plat_.width(), plat_.height(), vp_, eye_, ropt_);
-        if (in_.keyPressed['P'])
+        if (in_.keyPressed[KEY_F12])
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
         if (!demo_.empty() && shotIdx_ < shots_.size() && sim_->time >= shots_[shotIdx_]) {
             ren_.saveScreenshot(demo_ + "_" + std::to_string((int)shots_[shotIdx_]) + "s.bmp", plat_.width(), plat_.height());

@@ -49,11 +49,17 @@ The arguments are the scene, the seconds to simulate, the item to ignite and the
 | Left-click a surface | Place the selected ignition source there. The solver decides whether anything ignites. |
 | 1 / 2 / 3 | Source: match flame (0.05 kW), small flame (10 kW), large flame (100 kW) |
 | Right-click a door or window | Open or close the door, or break the window |
-| Left-drag / right-drag / wheel | Orbit / pan / zoom |
-| Space, + / - | Pause and resume, change the simulation speed |
-| R / C / F | Hide the roof, hide the ceiling, framing view |
-| S, T, PgUp / PgDn | Smoke on or off, temperature slice, slice height |
-| P | Save a screenshot next to the exe |
+| W A S D | Fly forward, left, back, right |
+| Space / C (or E / Q) | Fly up / down |
+| Shift / Ctrl | Fly faster / slower |
+| Hold a mouse button and drag, or arrow keys | Look around |
+| Wheel | Dolly forward or back |
+| P | Pause and resume |
+| + / - | Change the simulation speed |
+| R / Z / F | Hide the roof, hide the ceiling, framing view (also F2 / F3 / F4) |
+| X / V | Smoke on or off, fire on or off |
+| T, PgUp / PgDn | Temperature slice, slice height |
+| F12 | Save a screenshot next to the exe |
 | Backspace | Reset the house |
 | H | Show or hide the help |
 

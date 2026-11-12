@@ -47,6 +47,8 @@ int keyIndex(WPARAM vk) {
         case VK_F4: k = KEY_F4; break;
         case VK_F5: k = KEY_F5; break;
         case VK_F6: k = KEY_F6; break;
+        case VK_F12: k = KEY_F12; break;
+        case VK_PAUSE: k = KEY_PAUSE; break;
         case VK_SHIFT: k = KEY_SHIFT; break;
         case VK_CONTROL: k = KEY_CTRL; break;
         default: break;
