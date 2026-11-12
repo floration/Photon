@@ -1,4 +1,4 @@
-﻿# Photon material library - Phase 1 prototype set.
+# Photon material library - Phase 1 prototype set.
 #
 # Units: SI. Temperatures in kelvin.
 # PROTOTYPE DATA: values are typical literature values used to get a running
@@ -196,4 +196,40 @@ material steel
   combustible no
   color 0.75 0.76 0.78
   source "Incropera & DeWitt, Table A.1, plain carbon steel (verify)"
+end
+
+material latex_paint
+  name "Interior latex (acrylic) paint, dry film"
+  density 1400
+  conductivity 0.2
+  specific_heat 1500
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 600
+  heat_of_gasification 2.0e6
+  heat_of_combustion 20.0e6
+  soot_yield 0.03
+  aerosol_yield 0.05
+  char_yield 0.50        # pigments and fillers (TiO2, CaCO3) stay behind
+  surface_depth 0.0001
+  color 0.85 0.83 0.78   # display default; rooms set their own paint color
+  source "PROTOTYPE: dry film ~0.1 mm for two coats; acrylic binder burning values from Tewarson PMMA-class polymers, derated for pigment (verify)"
+end
+
+material polypropylene
+  name "Polypropylene (storage bins / totes)"
+  density 905
+  conductivity 0.22
+  specific_heat 1900
+  emissivity 0.9
+  combustible yes
+  pyrolysis_temp 620
+  heat_of_gasification 2.0e6
+  heat_of_combustion 38.6e6
+  soot_yield 0.059
+  aerosol_yield 0.03
+  char_yield 0.0
+  surface_depth 0.002
+  color 0.30 0.45 0.65
+  source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, polypropylene (verify); density/k/cp: polymer handbook typical (verify)"
 end

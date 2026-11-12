@@ -51,14 +51,29 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     auto cz = [&](int k) { return oz + (k + 0.5f) * dx; };
 
     const int iW0 = fi(0), iW1 = fi(sc.width), jS0 = fj(0), jN1 = fj(sc.depth);
-    kCeil = fk(sc.ceilingHeight);
+    kFloorS.assign(sc.stories, 0);
+    kCeilS.assign(sc.stories, 0);
+    for (int s = 0; s < sc.stories; ++s) {
+        kFloorS[s] = fk(sc.storyBase(s));
+        kCeilS[s] = fk(sc.storyBase(s) + sc.ceilingHeight);
+        if (s > 0 && kFloorS[s] <= kCeilS[s - 1]) kFloorS[s] = kCeilS[s - 1] + 1;  // keep a joist-space layer
+        if (kCeilS[s] <= kFloorS[s]) { err = "story too short for the grid"; return false; }
+    }
+    kCeil = kCeilS[sc.stories - 1];
     const int kSoffit = kCeil - 1;
     const int nEave = std::max(1, (int)std::lround(sc.eaveOverhang / dx));
+    auto storyOfK = [&](int k) {
+        int s = 0;
+        while (s + 1 < sc.stories && k >= kFloorS[s + 1]) ++s;
+        return s;
+    };
 
-    auto roomOf = [&](float x, float y) -> int {
+    auto roomOf = [&](float x, float y, int k) -> int {
+        int s = storyOfK(k);
+        if (k >= kCeilS[s]) return -1;  // joist space or attic
         for (size_t r = 0; r < sc.rooms.size(); ++r) {
             const Room& rm = sc.rooms[r];
-            if (x >= rm.x0 && x <= rm.x1 && y >= rm.y0 && y <= rm.y1) return (int)r;
+            if (rm.story == s && x >= rm.x0 && x <= rm.x1 && y >= rm.y0 && y <= rm.y1) return (int)r;
         }
         return -1;
     };
@@ -91,15 +106,17 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
         if (inside >= 0) {
             int ii, jj, kk;
             cellIJK(inside, ii, jj, kk);
-            b.room = roomOf(cx(ii), cy(jj));
+            b.room = roomOf(cx(ii), cy(jj), kk);
         }
         bv[face] = (int)barriers.size();
         barriers.push_back(b);
         return bv[face];
     };
 
-    // ---- walls (room level, k in [0, kCeil)) ----------------------------------
+    // ---- walls (each story; exterior walls also close the floor-joist band) ----
     for (const Wall& wl : sc.walls) {
+        int k0 = kFloorS[wl.story];
+        int k1 = wl.exterior && wl.story + 1 < sc.stories ? kFloorS[wl.story + 1] : kCeilS[wl.story];
         bool alongX = wl.y0 == wl.y1;
         float a = alongX ? std::min(wl.x0, wl.x1) : std::min(wl.y0, wl.y1);
         float b = alongX ? std::max(wl.x0, wl.x1) : std::max(wl.y0, wl.y1);
@@ -109,7 +126,7 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             for (int i = 0; i < nx; ++i) {
                 float x = cx(i);
                 if (x < a || x > b) continue;
-                for (int k = 0; k < kCeil; ++k) makeBarrier(1, i, jf, k, wl.assembly, BarrierKind::Wall, aInside);
+                for (int k = k0; k < k1; ++k) makeBarrier(1, i, jf, k, wl.assembly, BarrierKind::Wall, aInside);
             }
         } else {
             int ifc = fi(wl.x0);
@@ -117,7 +134,7 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             for (int j = 0; j < ny; ++j) {
                 float y = cy(j);
                 if (y < a || y > b) continue;
-                for (int k = 0; k < kCeil; ++k) makeBarrier(0, ifc, j, k, wl.assembly, BarrierKind::Wall, aInside);
+                for (int k = k0; k < k1; ++k) makeBarrier(0, ifc, j, k, wl.assembly, BarrierKind::Wall, aInside);
             }
         }
     }
@@ -131,8 +148,8 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
         for (int s = 0; s < (alongX ? nx : ny); ++s) {
             float c = alongX ? cx(s) : cy(s);
             if (c < a || c > b) continue;
-            for (int k = 0; k < kCeil; ++k) {
-                float z = cz(k);
+            for (int k = kFloorS[o.story]; k < kCeilS[o.story]; ++k) {
+                float z = cz(k) - sc.storyBase(o.story);
                 if (z < o.sill || z > o.head) continue;
                 int face = alongX ? yface(s, line, k) : xface(line, s, k);
                 std::vector<int>& bv = alongX ? by : bx;
@@ -165,9 +182,22 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             }
         }
     }
-    // ---- ceiling --------------------------------------------------------------
-    for (int j = jS0; j < jN1; ++j)
-        for (int i = iW0; i < iW1; ++i) makeBarrier(2, i, j, kCeil, sc.ceiling, BarrierKind::Ceiling, true);
+    // ---- ceilings and floors between stories (stairwells left open) -----------
+    auto inStair = [&](int s, int i, int j) {
+        float x = cx(i), y = cy(j);
+        for (const Stair& st : sc.stairs)
+            if (st.story == s && x > st.x0 && x < st.x1 && y > st.y0 && y < st.y1) return true;
+        return false;
+    };
+    for (int s = 0; s < sc.stories; ++s) {
+        bool top = s == sc.stories - 1;
+        for (int j = jS0; j < jN1; ++j)
+            for (int i = iW0; i < iW1; ++i) {
+                if (!top && inStair(s, i, j)) continue;
+                makeBarrier(2, i, j, kCeilS[s], top ? sc.ceiling : sc.floorCeiling, BarrierKind::Ceiling, true);
+                if (!top) makeBarrier(2, i, j, kFloorS[s + 1], sc.subfloor, BarrierKind::Floor, false);
+            }
+    }
 
     // ---- roof, eaves, soffits, gables ---------------------------------------
     auto inFoot = [&](int j) { return j >= jS0 && j < jN1; };
@@ -237,7 +267,7 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             for (int i = 0; i < nx; ++i) {
                 float x = cx(i), y = cy(j);
                 if (x <= rm.x0 || x >= rm.x1 || y <= rm.y0 || y >= rm.y1) continue;
-                int c = cell(i, j, 0);
+                int c = cell(i, j, kFloorS[rm.story]);
                 fuelMat[c] = (int16_t)rm.floorMaterial;
                 porous[c] = 1;
                 fuelMass0[c] = rm.floorArealMass * dx * dx;
@@ -247,7 +277,8 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     }
     // ---- truss lumber (porous fuel in attic cells) ------------------------------
     for (const Member& mb : sc.members) {
-        if (mb.kind != MemberKind::TrussChord && mb.kind != MemberKind::TrussWeb) continue;
+        bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb;
+        if (!truss && mb.kind != MemberKind::Joist && mb.kind != MemberKind::Tread) continue;
         float d[3] = {mb.p1[0] - mb.p0[0], mb.p1[1] - mb.p0[1], mb.p1[2] - mb.p0[2]};
         float L = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
         const Material& m = lb.materials[mb.material];
@@ -258,7 +289,8 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
             float x = mb.p0[0] + d[0] * t, y = mb.p0[1] + d[1] * t, z = mb.p0[2] + d[2] * t;
             int i = (int)std::floor((x - ox) / dx), j = (int)std::floor((y - oy) / dx), k = (int)std::floor((z - oz) / dx);
             if (i < 0 || j < 0 || i >= nx || j >= ny) continue;
-            k = std::clamp(k, kCeil, std::max(kCeil, ktop(j) - 1));
+            if (truss) k = std::clamp(k, kCeil, std::max(kCeil, ktop(j) - 1));
+            else if (mb.kind == MemberKind::Joist) { int s = storyOfK(k); k = std::clamp(k, kCeilS[s], std::max(kCeilS[s], (s + 1 < sc.stories ? kFloorS[s + 1] : kCeilS[s] + 1) - 1)); }
             if (k >= nz) continue;
             int c = cell(i, j, k);
             float mass = m.density * mb.width * mb.depth * seg;

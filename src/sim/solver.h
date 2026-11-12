@@ -1,4 +1,4 @@
-﻿// Photon - Phase 1 prototype solver.
+// Photon - Phase 1 prototype solver.
 //
 // PROTOTYPE PHYSICS - NOT VALIDATED. This is the first, crudest version of the
 // one solver. It gets fire behavior roughly right in shape and wrong in
@@ -23,7 +23,7 @@
 
 namespace photon {
 
-enum class BarrierKind : uint8_t { Wall, Ceiling, Roof, Soffit, Gable, Fascia, Door, Window };
+enum class BarrierKind : uint8_t { Wall, Ceiling, Floor, Roof, Soffit, Gable, Fascia, Door, Window };
 const char* barrierKindName(BarrierKind k);
 
 constexpr int MAX_LAYERS = 6;
@@ -95,7 +95,8 @@ public:
     int nx = 0, ny = 0, nz = 0, N = 0;
     float dx = 0.2f;
     float ox = 0, oy = 0, oz = 0;      // world position of cell (0,0,0) corner
-    int kCeil = 0;
+    int kCeil = 0;                     // top-story ceiling face (attic floor)
+    std::vector<int> kFloorS, kCeilS;  // per story: first cell layer, ceiling face
     int cell(int i, int j, int k) const { return i + nx * (j + ny * k); }
     void cellIJK(int c, int& i, int& j, int& k) const { i = c % nx; j = (c / nx) % ny; k = c / (nx * ny); }
     int xface(int i, int j, int k) const { return i + (nx + 1) * (j + ny * k); }

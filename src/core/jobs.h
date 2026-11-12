@@ -48,7 +48,12 @@ public:
         pending_.store((int)workers_.size(), std::memory_order_relaxed);
         generation_.fetch_add(1, std::memory_order_release);
         runChunks();
-        while (pending_.load(std::memory_order_acquire) > 0) PHOTON_PAUSE();
+        // spin, then yield: under oversubscription (another busy process) pure
+        // spinning starves the workers we are waiting for
+        for (int spin = 0; pending_.load(std::memory_order_acquire) > 0; ++spin) {
+            if (spin < 1000) PHOTON_PAUSE();
+            else std::this_thread::yield();
+        }
         fn_ = nullptr;
     }
 
@@ -66,7 +71,9 @@ private:
         for (;;) {
             uint64_t g = generation_.load(std::memory_order_acquire);
             if (g == seen) {
-                if (++idle < 20000) PHOTON_PAUSE();
+                ++idle;
+                if (idle < 1000) PHOTON_PAUSE();
+                else if (idle < 20000) std::this_thread::yield();
                 else std::this_thread::sleep_for(std::chrono::microseconds(500));
                 continue;
             }

@@ -59,9 +59,11 @@ private:
     Mat4 vp_;
     Vec3 eye_;
     // toggles
-    bool running_ = true, hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = true;
+    bool running_ = true, hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = true, upperCut_ = false;
+    float cutZ() const { return upperCut_ && sim_->kCeilS.size() > 1 ? sim_->oz + sim_->kCeilS[0] * sim_->dx : 1e9f; }
     RenderOptions ropt_;
     int source_ = 1, speedIdx_ = 2;
+    int paintMat_ = -1;
     double lastMesh_ = -1;
     bool meshDirty_ = true;
     int dragButton_ = -1, dragPixels_ = 0;
@@ -95,6 +97,7 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     std::string sp = scenePath;
     if (sp.find(':') == std::string::npos && sp.rfind('/', 0) != 0) sp = base + sp;
     if (!scene_.load(sp, lib_, err)) return false;
+    paintMat_ = lib_.findMaterial("latex_paint");
     if (!plat_.createWindow("Photon - Phase 1 prototype - PROTOTYPE PHYSICS, NOT VALIDATED", 1600, 950, err)) return false;
     if (!ren_.init(plat_, err)) return false;
     resetSim();
@@ -224,7 +227,7 @@ std::string Viewer::describe(const Hit& h) {
     const Solver& s = *sim_;
     if (h.kind == 0) return "";
     std::string out;
-    const Room* rm = scene_.roomAt(h.pos.x, h.pos.y);
+    const Room* rm = scene_.roomAt(h.pos.x, h.pos.y, h.pos.z + 0.01f);
     out += rm ? rm->name : "Outside";
     if (h.from >= 0 && !s.blocked[h.from]) {
         int c = h.from;
@@ -271,6 +274,7 @@ void Viewer::handleInput(float frameDt) {
     if (in.keyPressed['X'] || in.keyPressed[KEY_F5]) ropt_.smoke = !ropt_.smoke;
     if (in.keyPressed['V']) ropt_.fire = !ropt_.fire;
     if (in.keyPressed['T'] || in.keyPressed[KEY_F6]) ropt_.slice = !ropt_.slice;
+    if (in.keyPressed['U']) { upperCut_ = !upperCut_; meshDirty_ = true; }
     if (in.keyPressed['H'] || in.keyPressed[KEY_F1]) help_ = !help_;
     if (in.keyPressed[KEY_PAGEUP]) ropt_.sliceZ = std::min(ropt_.sliceZ + 0.2f, scene_.ridgeHeight());
     if (in.keyPressed[KEY_PAGEDOWN]) ropt_.sliceZ = std::max(ropt_.sliceZ - 0.2f, 0.1f);
@@ -371,20 +375,27 @@ void Viewer::buildMeshes() {
         addQuad(op, Vec3(-e, -e, -0.002f), Vec3(scene_.width + e, -e, -0.002f), Vec3(scene_.width + e, scene_.depth + e, -0.002f),
                 Vec3(-e, scene_.depth + e, -0.002f), Vec3(0, 0, 1), Vec3(0.36f, 0.45f, 0.30f), Vec3());
     }
+    const float zc = cutZ();
+    for (size_t st = 0; st < s.kFloorS.size(); ++st)
     for (int j = 0; j < s.ny; ++j)
         for (int i = 0; i < s.nx; ++i) {
-            int c = s.cell(i, j, 0);
+            int kf = s.kFloorS[st];
+            float zb = s.oz + kf * dx;
+            if (zb >= zc) continue;
+            int c = s.cell(i, j, kf);
             float x0 = s.ox + i * dx, y0 = s.oy + j * dx;
             if (x0 < -0.01f || y0 < -0.01f || x0 + dx > scene_.width + 0.11f || y0 + dx > scene_.depth + 0.11f) continue;
             Vec3 col(0.55f, 0.55f, 0.53f), emi;
-            float z = 0.0f;
-            if (s.porous[c] && s.fuelMat[c] >= 0 && !s.blocked[c]) {
+            float z = zb + (st > 0 ? 0.004f : 0.0f);
+            bool covered = s.porous[c] && s.fuelMat[c] >= 0 && !s.blocked[c] && s.fuelMat[c] != scene_.joistMaterial;
+            if (st > 0 && !covered) continue;   // upper floors: the subfloor barrier is drawn instead
+            if (covered) {
                 const Material& m = lib_.materials[s.fuelMat[c]];
                 float left = s.fuelMass0[c] > 0 ? s.fuelMass[c] / (s.fuelMass0[c] * std::max(0.01f, 1 - m.charYield)) : 0;
                 float k = 0.15f + 0.85f * std::clamp(left, 0.0f, 1.0f);
                 col = Vec3(m.color[0], m.color[1], m.color[2]) * k;
                 emi = glow(s.fuelT[c]);
-                z = 0.012f * std::clamp(left, 0.2f, 1.0f);
+                z += 0.012f * std::clamp(left, 0.2f, 1.0f);
             }
             addQuad(op, Vec3(x0, y0, z), Vec3(x0 + dx, y0, z), Vec3(x0 + dx, y0 + dx, z), Vec3(x0, y0 + dx, z), Vec3(0, 0, 1), col, emi);
         }
@@ -397,6 +408,7 @@ void Viewer::buildMeshes() {
         else if (ax == 1) { i = f % s.nx; j = (f / s.nx) % (s.ny + 1); k = f / (s.nx * (s.ny + 1)); }
         else { i = f % s.nx; j = (f / s.nx) % s.ny; k = f / (s.nx * s.ny); }
         float x = s.ox + i * dx, y = s.oy + j * dx, z = s.oz + k * dx;
+        if (z >= zc - 1e-3f) continue;
         Vec3 p0(x, y, z), u, w, n;
         if (ax == 0) { u = Vec3(0, dx, 0); w = Vec3(0, 0, dx); n = Vec3(1, 0, 0); }
         else if (ax == 1) { u = Vec3(0, 0, dx); w = Vec3(dx, 0, 0); n = Vec3(0, 1, 0); }
@@ -411,6 +423,16 @@ void Viewer::buildMeshes() {
             float dmg = m.combustible ? 0.0f : std::clamp(b.damage[layer], 0.0f, 1.0f);
             float kk = (0.2f + 0.8f * left) * (1 - 0.5f * dmg);
             Vec3 col = Vec3(m.color[0], m.color[1], m.color[2]) * kk;
+            if (as.layers[layer].material == paintMat_) {   // paint takes the color of the room it faces
+                int sc = side == 0 ? b.cellA : b.cellB;
+                if (sc >= 0) {
+                    int ci, cj, ck;
+                    s.cellIJK(sc, ci, cj, ck);
+                    const Room* rm = scene_.roomAt(s.ox + (ci + 0.5f) * dx, s.oy + (cj + 0.5f) * dx, s.oz + (ck + 0.5f) * dx);
+                    if (rm && b.kind != BarrierKind::Ceiling) col = Vec3(rm->paint[0], rm->paint[1], rm->paint[2]) * kk;
+                    else col = Vec3(0.93f, 0.93f, 0.91f) * kk;   // flat white ceilings
+                }
+            }
             if (b.kind == BarrierKind::Ceiling && side == 0) col = col * 0.95f;
             Vec3 e = glow(b.T[asmSide]);
             if (b.kind == BarrierKind::Window) {
@@ -433,6 +455,7 @@ void Viewer::buildMeshes() {
         Vec3 col = Vec3(m.color[0], m.color[1], m.color[2]) * (0.12f + 0.88f * left);
         Vec3 e = glow(s.fuelT[c]);
         float x0 = s.ox + i * dx, y0 = s.oy + j * dx, z0 = s.oz + k * dx;
+        if (z0 >= zc) continue;
         Vec3 P[8];
         for (int q = 0; q < 8; ++q) P[q] = Vec3(x0 + ((q & 1) ? dx : 0), y0 + ((q & 2) ? dx : 0), z0 + ((q & 4) ? dx : 0));
         auto exposed = [&](int d) {
@@ -453,7 +476,8 @@ void Viewer::buildMeshes() {
     for (const Member& mb : scene_.members) {
         bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb || mb.kind == MemberKind::Gusset;
         if (truss && !showTruss) continue;
-        if (!truss && !framing_) continue;
+        if (!truss && mb.kind != MemberKind::Tread && !framing_) continue;
+        if (std::min(mb.p0[2], mb.p1[2]) >= zc) continue;
         Vec3 a(mb.p0[0], mb.p0[1], mb.p0[2]), b(mb.p1[0], mb.p1[1], mb.p1[2]);
         Vec3 dir = b - a;
         float L = length(dir);
@@ -582,7 +606,7 @@ void Viewer::drawOverlay() {
             "Left-click a surface        start a fire with the selected source (solver decides if it ignites)",
             "Right-click a door/window   open or close a door, break a window",
             "WASD move  Space/C up/down (or E/Q)  Shift fast  Ctrl slow   hold mouse + drag  look   wheel  dolly   arrows  turn",
-            "P  pause   +/-  speed   R roof  Z ceiling  F framing  X smoke  V fire  T slice   Backspace reset   H help",
+            "P  pause   +/-  speed   U upper story   R roof  Z ceiling  F framing  X smoke  V fire  T slice   Backspace reset   H help",
             "Doors and windows start as in the scene file. Closed house fires can starve for oxygen.",
         };
         float hy = lh * 3 + 24;
@@ -618,7 +642,7 @@ void Viewer::run() {
         if (meshDirty_) buildMeshes();
         uploadVolume();
         ropt_.time = (float)now;
-        ropt_.clipZ = hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f;
+        ropt_.clipZ = std::min(hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f, cutZ());
         if (now - lastHover > 0.1) {
             hover_ = describe(pick(in_.mouseX, in_.mouseY));
             lastHover = now;

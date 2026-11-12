@@ -9,7 +9,8 @@
 # in docs/DATA_REGISTER.md. Imperial sizes given in comments.
 
 assembly ext_wall_2x4
-  name "Exterior wall: 1/2 in gypsum, 2x4 @ 16 in o.c. with R-13 batt, 7/16 in OSB, vinyl siding"
+  name "Exterior wall: painted 1/2 in gypsum, 2x4 @ 16 in o.c. with R-13 batt, 7/16 in OSB, vinyl siding"
+  layer latex_paint 0.0001                     # two coats latex
   layer gypsum_board 0.0127                    # 1/2 in
   layer lumber_spf 0.0889 fill 0.094 r 2.29    # 2x4 (3-1/2 in deep) studs, 1-1/2 in every 16 in; R-13 batt
   layer osb 0.0111                             # 7/16 in wall sheathing
@@ -19,16 +20,19 @@ assembly ext_wall_2x4
 end
 
 assembly int_wall_2x4
-  name "Interior partition: 1/2 in gypsum both sides of 2x4 @ 16 in o.c."
+  name "Interior partition: painted 1/2 in gypsum both sides of 2x4 @ 16 in o.c."
+  layer latex_paint 0.0001
   layer gypsum_board 0.0127
   layer lumber_spf 0.0889 fill 0.094 r 0.17    # empty stud cavity (air space)
   layer gypsum_board 0.0127
+  layer latex_paint 0.0001
   leakage 0.0
   source "PS 20; IRC R602.3(5); IRC R702.3.5 (verify)"
 end
 
 assembly ceiling_r38
-  name "Ceiling: 1/2 in sag-resistant gypsum on truss bottom chords, R-38 blown fiberglass above"
+  name "Ceiling: painted 1/2 in sag-resistant gypsum on truss bottom chords, R-38 blown fiberglass above"
+  layer latex_paint 0.0001
   layer gypsum_board 0.0127                    # 1/2 in ceiling board on 24 in o.c. framing
   layer fiberglass 0.33 r 6.69                 # R-38 (~13 in blown)
   leakage 0.0002
@@ -85,4 +89,19 @@ assembly window_double
   layer glass 0.003 r 0.17                     # includes the 1/2 in sealed air gap
   leakage 0.0005
   source "Glass thickness typical residential IGU (verify, ASTM E1300); U ~ 0.48 Btu/h ft2 F"
+end
+
+assembly floor_ceiling_gyp
+  name "Ceiling between stories: painted 1/2 in gypsum on 2x10 floor joists (joist space above)"
+  layer latex_paint 0.0001
+  layer gypsum_board 0.0127
+  leakage 0.0001
+  source "IRC Table R702.3.5 (verify)"
+end
+
+assembly subfloor_osb
+  name "Subfloor: 23/32 in OSB on 2x10 joists @ 16 in o.c."
+  layer osb 0.0183                             # 23/32 in tongue-and-groove, span rating 24 o.c.
+  leakage 0.0
+  source "IRC Table R503.2.1.1(1) (verify); joists 2x10 @ 16 in o.c. per IRC Table R502.3.1(2) (verify span)"
 end

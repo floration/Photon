@@ -26,6 +26,7 @@ const char* barrierKindName(BarrierKind k) {
     switch (k) {
     case BarrierKind::Wall: return "wall";
     case BarrierKind::Ceiling: return "ceiling";
+    case BarrierKind::Floor: return "floor";
     case BarrierKind::Roof: return "roof";
     case BarrierKind::Soffit: return "soffit";
     case BarrierKind::Gable: return "gable";
@@ -112,7 +113,7 @@ void Solver::addIgnition(int c, float power, float duration, const std::string& 
     cellIJK(c, i, j, k);
     int room = -1;
     if (scene) {
-        const Room* r = scene->roomAt(ox + (i + 0.5f) * dx, oy + (j + 0.5f) * dx);
+        const Room* r = scene->roomAt(ox + (i + 0.5f) * dx, oy + (j + 0.5f) * dx, oz + (k + 0.5f) * dx);
         if (r) room = (int)(r - scene->rooms.data());
     }
     events.push_back({time, label + " placed in " + roomName(room)});
@@ -495,6 +496,16 @@ void Solver::barriersStep(float dt) {
             float mass = std::max(b.mass[L[s]], 0.05f);
             if (m.combustible) mass = std::min(mass, m.density * m.surfaceDepth);
             C[s] = std::max(200.0f, mass * m.specificHeat);
+            // A coating (paint) heats with the board it is bonded to.
+            if (ly.thickness < 0.001f && L[0] != L[1]) {
+                int inner = s == 0 ? L[s] + 1 : L[s] - 1;
+                if (inner != L[1 - s]) {
+                    const Material& mi = lib->materials[as.layers[inner].material];
+                    float mm = std::max(b.mass[inner], 0.05f);
+                    if (mi.combustible) mm = std::min(mm, mi.density * mi.surfaceDepth);
+                    C[s] += mm * mi.specificHeat;
+                }
+            }
             if (g[s] < 0) continue;
             float Tg = T[g[s]], Tn = b.T[s];
             float rho = P0 / (RS * Tg);
@@ -561,6 +572,7 @@ void Solver::barriersStep(float dt) {
                     break;
                 case BarrierKind::Ceiling: logEvent("ceil-" + where, "Ceiling opened over " + where + " - fire into attic"); break;
                 case BarrierKind::Roof: logEvent("roof", "Roof deck burned through - self-venting"); break;
+                case BarrierKind::Floor: logEvent("floor-" + where, "Floor burned through above " + where); break;
                 case BarrierKind::Soffit: logEvent("soffit", "Soffit failed - eave open to attic"); break;
                 case BarrierKind::Wall: logEvent("wall-" + where, "Wall burned through in " + where); break;
                 default: logEvent(std::string(barrierKindName(b.kind)) + "-fail", std::string(barrierKindName(b.kind)) + " burned through"); break;
@@ -570,7 +582,7 @@ void Solver::barriersStep(float dt) {
             // newly exposed layer starts at the old node temperature
             if (s == 0) { L[0] = b.front; } else { L[1] = b.back; }
             if (b.front == b.back) b.T[0] = b.T[1] = std::max(b.T[0], b.T[1]);
-            if (b.kind == BarrierKind::Ceiling && s == 0)
+            if (b.kind == BarrierKind::Ceiling && s == 0 && !m.combustible)
                 logEvent("ceil-gyp-" + roomName(b.room), "Ceiling gypsum falling in " + roomName(b.room));
         }
     }

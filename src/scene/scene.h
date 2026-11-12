@@ -13,6 +13,7 @@ struct Box3 { float x0, y0, z0, x1, y1, z1; };
 
 struct Wall {
     int assembly = -1;
+    int story = 0;
     float x0, y0, x1, y1;   // centerline, axis-aligned
     bool exterior = false;
 };
@@ -21,15 +22,18 @@ enum class OpeningKind { Door, Window, Cased };
 
 struct Opening {
     OpeningKind kind = OpeningKind::Door;
+    int story = 0;
     int assembly = -1;      // -1 for a cased (doorless) opening
     std::string name;
     float x0, y0, x1, y1;   // along a wall centerline
-    float sill = 0, head = 2.03f;
+    float sill = 0, head = 2.03f;   // above the story floor
     bool open = false;
 };
 
 struct Room {
     std::string name;
+    int story = 0;
+    float paint[3] = {0.85f, 0.83f, 0.78f};   // wall paint color (display)
     float x0, y0, x1, y1;
     int floorMaterial = -1;     // floor covering (carpet, vinyl), -1 none
     float floorArealMass = 0;   // kg/m2
@@ -43,10 +47,18 @@ struct Part {
 
 struct Item {
     std::string name;
+    int story = 0;
     std::vector<Part> parts;
 };
 
-enum class MemberKind { Stud, Plate, Header, TrussChord, TrussWeb, Gusset };
+enum class MemberKind { Stud, Plate, Header, TrussChord, TrussWeb, Gusset, Joist, Tread };
+
+// Stair from story up to story+1: opening through the floor above plus treads.
+struct Stair {
+    int story = 0;
+    float x0, y0, x1, y1;   // plan rectangle of the stairwell
+    int dir = 0;            // 0 = rises toward +x, 1 = toward -x, 2 = +y, 3 = -y
+};
 
 // A straight framing member: centerline p0->p1, cross-section `width` along
 // `side` and `depth` along cross(dir, side).
@@ -66,17 +78,25 @@ struct Scene {
     float eaveOverhang = 0.406f;
     float trussSpacing = 0.610f, studSpacing = 0.406f;
     float atticVentRatio = 150;               // 1 sq ft net free vent area per N sq ft of attic floor
+    int stories = 1;
+    float floorDepth = 0.254f;                // joist + subfloor depth between stories (m)
+    float joistSpacing = 0.406f, joistDepth = 0.235f;   // 2x10 @ 16 in o.c. by default
+    int floorCeiling = -1, subfloor = -1, joistMaterial = -1;
     int extWall = -1, ceiling = -1, roof = -1, soffit = -1, gable = -1, fascia = -1;
     int studMaterial = -1, trussMaterial = -1, gussetMaterial = -1;
     std::vector<Wall> walls;
     std::vector<Opening> openings;
     std::vector<Room> rooms;
     std::vector<Item> items;
+    std::vector<Stair> stairs;
     std::vector<Member> members;              // generated framing
 
     bool load(const std::string& path, const MaterialLibrary& lib, std::string& err);
-    float ridgeHeight() const { return ceilingHeight + pitch * depth * 0.5f; }
-    const Room* roomAt(float x, float y) const;
+    float storyBase(int s) const { return s * (ceilingHeight + floorDepth); }
+    float roofBase() const { return storyBase(stories - 1) + ceilingHeight; }
+    float ridgeHeight() const { return roofBase() + pitch * depth * 0.5f; }
+    int storyAt(float z) const;
+    const Room* roomAt(float x, float y, float z) const;
 
 private:
     void generateFraming(const MaterialLibrary& lib);
