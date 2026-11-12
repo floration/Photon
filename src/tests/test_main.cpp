@@ -372,6 +372,12 @@ TEST(structure_stable_then_collapses) {
     CHECK_MSG(total > 20000 && total < 400000, "house mass " + std::to_string(total) + " kg");   // tens of tonnes incl. slab
     st.update(s, 0.25f);
     CHECK_MSG(st.fallenCount() == 0, "pieces fell with no fire");
+    // engineering capacities in the right range (intact, ultimate)
+    for (const Piece& p : st.pieces()) {
+        const std::string& k = w.scene.objects[p.object].kind;
+        if (k == "floor joist" && p.len > 3.5f) CHECK_MSG(p.capacity > 5e3f && p.capacity < 3e4f, "joist " + std::to_string(p.capacity) + " N");
+        if (k == "stud" && p.len > 2.0f) CHECK_MSG(p.capacity > 5e3f && p.capacity < 8e4f, "stud " + std::to_string(p.capacity) + " N");
+    }
     int falling = 0;
     for (const Piece& p : st.pieces()) falling += p.state != PieceState::Standing;
     CHECK_MSG(falling == 0, std::to_string(falling) + " pieces unstable at t=0");

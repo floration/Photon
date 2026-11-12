@@ -135,6 +135,15 @@ bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
         else if (k == "surface_depth") dst = &cur->surfaceDepth;
         else if (k == "fail_temp") dst = &cur->failTemp;
         else if (k == "fail_time") dst = &cur->failTime;
+        else if (k == "design_fb") dst = &cur->designFb;
+        else if (k == "design_fc") dst = &cur->designFc;
+        else if (k == "design_fc_perp") dst = &cur->designFcPerp;
+        else if (k == "modulus_e") dst = &cur->modulusE;
+        else if (k == "modulus_emin") dst = &cur->modulusEmin;
+        else if (k == "panel_load") dst = &cur->panelLoad;
+        else if (k == "panel_ref_thickness") dst = &cur->panelRefThickness;
+        else if (k == "fastener_pull") dst = &cur->fastenerPull;
+        else if (k == "fastener_density") dst = &cur->fastenerDensity;
         if (!dst) { err = where(f, l) + "unknown key '" + k + "'"; return false; }
         if (!num(1, *dst)) return false;
     }

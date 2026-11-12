@@ -34,6 +34,12 @@ material gypsum_board
   source "density/k/cp: SFPE Handbook 5th ed., thermal property appendix (verify); Gypsum Association GA-235 for board mass"
   source "fail_temp/fail_time: PROTOTYPE estimate, replaced by dehydration + fall-off model in Phase 4"
   offgas H2O 1.0  # chemically bound water driven off as steam (~21% of board mass), dehydration only
+  # structural (attached boards): ASTM C1396 nail pull resistance, 1/2 in regular board: 77 lbf = 343 N per
+  # fastener. Ceiling attachment about 5.5 fasteners per m2 (screws 12 in o.c. on framing 24 in o.c., GA-216).
+  # Heat reduces it as the board dehydrates (integrity from the fire model).
+  fastener_pull 343
+  fastener_density 5.5
+  source "Structural: ASTM C1396 Table (nail pull resistance) (verify); fastening per Gypsum Association GA-216 (verify)"
 end
 
 material glass
@@ -79,6 +85,16 @@ material lumber_spf
   offgas C2H4 0.02
   offgas C3H4O 0.01
   offgas H2 0.01
+  # structural (NDS Supplement 2018, Table 4A, Spruce-Pine-Fir No.1/No.2, visually graded dimension lumber;
+  # verify): Fb 875 psi, Fc 1150 psi, Fc-perp 425 psi, E 1,400,000 psi, Emin 510,000 psi. Size factors and the
+  # conversion to mean ultimate strength (NDS 2018 Table 16.2.2: 2.85 bending, 2.58 compression) are applied
+  # in the structure model.
+  design_fb 6.03e6
+  design_fc 7.93e6
+  design_fc_perp 2.93e6
+  modulus_e 9.65e9
+  modulus_emin 3.52e9
+  source "Structural: AWC NDS Supplement (2018) Table 4A, SPF No.1/No.2 (verify); NDS (2018) Chapter 16 fire design"
 end
 
 material osb
@@ -109,6 +125,12 @@ material osb
   offgas C2H4 0.02
   offgas C3H4O 0.01
   offgas H2 0.01
+  # structural (panels): ultimate uniform load. 7/16 in roof sheathing, 24/16 span rating: 40 psf live +
+  # 10 psf dead allowable (IRC Table R503.2.1.1(1)); about 2.5x to ultimate -> 125 psf = 5985 Pa. Scales with
+  # thickness squared (plate bending) for thicker panels such as 23/32 in subfloor.
+  panel_load 5985
+  panel_ref_thickness 0.0111
+  source "Structural: IRC Table R503.2.1.1(1) allowable loads (verify); ultimate factor 2.5 PROTOTYPE pending APA test data"
 end
 
 material asphalt_shingle

@@ -46,3 +46,17 @@ Every value is in `data/materials.txt` next to its source line. The thermal prop
 ## Material off-gas splits
 
 Each material lists what it gives off by mass fraction, for example wood (tar, steam, CO2, CO, acetic acid, methane, methanol, formaldehyde), PVC (HCl about 55%), flexible PU foam (TDI, HCN), nylon (caprolactam) and gypsum (steam from bound water). The splits are **prototype** estimates and a Phase 4 data job will replace them with measured pyrolysis product data per material.
+
+## Structural values (structure model)
+
+| Item | Value | Source | Status |
+| --- | --- | --- | --- |
+| SPF No.1/No.2 Fb, Fc, Fc-perp, E, Emin | 875, 1150, 425 psi; 1.4e6, 0.51e6 psi | AWC NDS Supplement 2018 Table 4A | verify |
+| Size factors CF | Fb 1.5/1.3/1.2/1.1, Fc 1.15/1.1/1.05/1.0 for 2x4/6/8/10 | NDS Supplement Table 4A adjustment factors | verify |
+| Design to mean ultimate | 2.85 bending, 2.58 compression | NDS 2018 Table 16.2.2 (fire design) | verify |
+| Column stability | Ylinen curve, c = 0.8 | NDS 2018 Eq. 3.7-1 | verify |
+| Zero-strength layer | 7 mm | EN 1995-1-2 reduced cross-section method | verify |
+| OSB panel ultimate uniform load | 125 psf at 7/16 in, scaled by thickness squared | IRC Table R503.2.1.1(1) allowable x 2.5 | prototype factor |
+| Gypsum fastener pull-through | 77 lbf per fastener, about 5.5 per m2 on ceilings | ASTM C1396; GA-216 | verify |
+
+Loads are dead weight only, with no live load or firefighter weight yet. Gusset plates and connections do not fail yet; that is Phase 12.

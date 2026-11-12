@@ -18,7 +18,8 @@
 
 namespace photon {
 
-enum class PieceState : uint8_t { Standing, Falling, Fallen };
+enum class PieceState : uint8_t { Standing, Falling, Fallen, Gone };   // Gone: burned away completely
+enum class Role : uint8_t { None, Column, Beam, Bearing, Panel, Attached };
 
 struct Piece {
     int object = -1;              // index into Scene::objects
@@ -28,7 +29,10 @@ struct Piece {
     std::vector<int> supports;    // pieces that hold this one up
     float integrity = 1;          // remaining fraction of section / material
     float load = 0;               // kg carried, own weight included
-    float capacity = 0;           // kg it can carry when intact (prototype)
+    float capacity = 0;           // N it can carry now (from engineering values and remaining section)
+    Role role = Role::None;
+    float b = 0, d = 0, len = 0, area = 0;   // member breadth, depth, length (m); panel area (m2)
+    int landCell = -1;            // fire-grid cell its fuel landed in after a fall
     PieceState state = PieceState::Standing;
     float dz = 0, vz = 0;         // fall offset (m) and velocity (m/s)
     float zmin = 0, zmax = 0, bb[4] = {0, 0, 0, 0};   // world bounds (x0, y0, x1, y1)
@@ -57,6 +61,7 @@ private:
     int fallen_ = 0;
     std::vector<std::string> reported_;
     void readIntegrity(const Solver& sim);
+    float strength(const Piece& p) const;   // N, ultimate, for the current integrity
     void report(Solver& sim, const std::string& key, const std::string& text);
 };
 

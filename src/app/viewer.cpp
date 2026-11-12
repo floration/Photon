@@ -769,7 +769,7 @@ void Viewer::buildMeshes() {
     }
     // debris: everything that has failed and fallen, drawn where it landed
     for (const Piece& p : struct_.pieces()) {
-        if (p.state == PieceState::Standing) continue;
+        if (p.state == PieceState::Standing || p.state == PieceState::Gone) continue;
         const SceneObject& o = scene_.objects[p.object];
         if (o.c[2] + p.dz >= zc) continue;
         const Material& m = lib_.materials[o.material];

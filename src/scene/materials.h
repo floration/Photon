@@ -43,6 +43,12 @@ struct Material {
     float failTime = 0;             // s above failTemp before the layer is gone
     float color[3] = {0.7f, 0.7f, 0.7f};
     std::vector<Offgas> offgas;     // what it gives off when heated, by mass fraction
+    // Structural values (0 = not a structural material). Reference design values
+    // as published; the structure model converts them to mean ultimate strength.
+    float designFb = 0, designFc = 0, designFcPerp = 0;   // Pa: bending, compression parallel, compression perpendicular
+    float modulusE = 0, modulusEmin = 0;                  // Pa
+    float panelLoad = 0, panelRefThickness = 0;           // Pa ultimate uniform load at the reference thickness (panels)
+    float fastenerPull = 0, fastenerDensity = 0;          // N per fastener pull-through, fasteners per m2 (attached boards)
     std::string source;
 };
 

@@ -16,11 +16,29 @@ bool isSheet(const std::string& k) {
     return k.find("sheet") != std::string::npos || k == "roof deck panel" || k == "roofing" || k == "siding course" ||
            k == "subfloor panel" || k == "soffit" || k == "insulation" || k == "insulation batt";
 }
-// Prototype strength: an intact member carries this many times its own weight.
-// Replaced in Phase 12 by section properties, span and connection capacity.
-constexpr float FRAMING_CAPACITY = 400.0f;
-constexpr float OTHER_CAPACITY = 60.0f;
-constexpr float FAIL_INTEGRITY = 0.15f;
+// Strength (see docs/DATA_REGISTER.md):
+//  - wood members: NDS reference design values from the material file, size
+//    factor CF from NDS Supplement Table 4A, converted to mean ultimate strength
+//    with the NDS 2018 Table 16.2.2 factors (2.85 bending, 2.58 compression);
+//    columns use the Ylinen column curve (NDS Eq. 3.7-1, c = 0.8) with Euler
+//    buckling about the unbraced (depth) axis.
+//  - fire: the remaining section comes from the consumed fraction, less a 7 mm
+//    zero-strength layer on each side once charring has started (Eurocode 5,
+//    EN 1995-1-2, reduced cross-section method).
+//  - panels: ultimate uniform load from the material file, scaled by thickness^2.
+//  - attached boards (gypsum): fastener pull-through times fastener density.
+constexpr float NDS_ULT_BENDING = 2.85f, NDS_ULT_COMPRESSION = 2.58f;
+constexpr float ZERO_STRENGTH_LAYER = 0.007f;
+constexpr float FAIL_INTEGRITY = 0.05f;   // below this a piece is treated as burned away
+constexpr float IN_M = 0.0254f;
+Role roleFor(const std::string& k) {
+    if (k == "stud" || k == "truss chord" || k == "truss web" || k == "collar tie") return Role::Column;
+    if (k == "floor joist" || k == "rafter" || k == "header" || k == "ridge board" || k == "stair tread") return Role::Beam;
+    if (k == "plate") return Role::Bearing;
+    if (k == "subfloor panel" || k == "roof deck panel") return Role::Panel;
+    if (k.find("gypsum") != std::string::npos) return Role::Attached;
+    return Role::None;
+}
 constexpr float G = 9.81f;
 } // namespace
 
@@ -51,7 +69,11 @@ bool Structure::build(const Scene& sc, const MaterialLibrary& lib, const Solver&
         p.bb[0] = o.c[0] - ex[0]; p.bb[1] = o.c[1] - ex[1]; p.bb[2] = o.c[0] + ex[0]; p.bb[3] = o.c[1] + ex[1];
         p.zmin = o.c[2] - ex[2];
         p.zmax = o.c[2] + ex[2];
-        p.capacity = p.mass * (p.framing ? FRAMING_CAPACITY : OTHER_CAPACITY);
+        p.role = roleFor(o.kind);
+        p.len = 2 * o.hu;
+        p.b = 2 * std::min(o.hv, o.hn);
+        p.d = 2 * std::max(o.hv, o.hn);
+        p.area = 4 * o.hu * o.hv;
         byObject_[oi] = (int)pieces_.size();
         pieces_.push_back(p);
     }
@@ -164,8 +186,56 @@ bool Structure::build(const Scene& sc, const MaterialLibrary& lib, const Solver&
     return true;
 }
 
+float Structure::strength(const Piece& p) const {
+    const SceneObject& o = scene_->objects[p.object];
+    const Material& m = lib_->materials[o.material];
+    float r = std::clamp(p.integrity, 0.0f, 1.0f);
+    switch (p.role) {
+    case Role::Column: case Role::Beam: case Role::Bearing: {
+        if (m.designFb <= 0) return 1e12f;
+        float s = std::sqrt(r), zl = r < 0.995f ? 2 * ZERO_STRENGTH_LAYER : 0.0f;
+        float b = std::max(0.0f, p.b * s - zl), d = std::max(0.0f, p.d * s - zl);
+        if (b <= 0 || d <= 0) return 0;
+        float din = p.d / IN_M;   // size factor from the nominal depth
+        float cfb = din <= 3.6f ? 1.5f : din <= 5.6f ? 1.3f : din <= 7.3f ? 1.2f : din <= 9.3f ? 1.1f : 1.0f;
+        float cfc = din <= 3.6f ? 1.15f : din <= 5.6f ? 1.1f : din <= 7.3f ? 1.05f : din <= 9.3f ? 1.0f : 0.9f;
+        if (p.role == Role::Beam) {
+            float fb = NDS_ULT_BENDING * m.designFb * cfb;
+            float M = fb * b * d * d / 6.0f;
+            return 8.0f * M / std::max(p.len, 0.3f);   // total uniform load on a simple span
+        }
+        if (p.role == Role::Bearing) return 2.5f * m.designFcPerp * b * std::max(p.len, 0.1f);
+        float fc = NDS_ULT_COMPRESSION * m.designFc * cfc;
+        float le = o.kind == "stud" ? p.len : 0.5f * p.len;   // truss and collar members braced at mid-length
+        float fce = 3.14159265f * 3.14159265f * m.modulusE * d * d / (12.0f * le * le);
+        float a = fce / fc, cc = 0.8f;
+        float cp = (1 + a) / (2 * cc) - std::sqrt(std::max(0.0f, ((1 + a) / (2 * cc)) * ((1 + a) / (2 * cc)) - a / cc));
+        return fc * cp * b * d;
+    }
+    case Role::Panel: {
+        if (m.panelLoad <= 0) return 1e12f;
+        float t = 2 * o.hn, tr = m.panelRefThickness > 0 ? m.panelRefThickness : t;
+        return m.panelLoad * (t / tr) * (t / tr) * p.area * r;
+    }
+    case Role::Attached:
+        if (m.fastenerPull <= 0) return 1e12f;
+        return m.fastenerPull * m.fastenerDensity * p.area * r;
+    default:
+        return 1e12f;   // furniture, wiring, pipes: fail only by burning or losing their support
+    }
+}
+
 void Structure::readIntegrity(const Solver& sim) {
     for (Piece& p : pieces_) {
+        if (p.state == PieceState::Fallen && p.landCell >= 0) {   // debris keeps burning where it landed
+            int c = p.landCell;
+            if (sim.fuelMat[c] >= 0 && sim.fuelMass0[c] > 0) {
+                const Material& m = lib_->materials[sim.fuelMat[c]];
+                p.integrity = std::min(p.integrity, std::clamp(sim.fuelMass[c] / (sim.fuelMass0[c] * (1 - m.charYield)), 0.0f, 1.0f));
+            } else p.integrity = 0;
+            if (p.integrity < FAIL_INTEGRITY) p.state = PieceState::Gone;
+            continue;
+        }
         if (p.state != PieceState::Standing) continue;
         float rem = 0, tot = 0;
         for (int c : p.cells) {
@@ -245,12 +315,17 @@ void Structure::update(Solver& sim, float dt) {
             Piece& p = pieces_[i];
             if (p.state != PieceState::Standing || p.ground) continue;
             bool consumed = p.integrity < FAIL_INTEGRITY && (!p.cells.empty() || !p.barriers.empty());
-            float strength = p.capacity * std::pow(std::max(p.integrity, 0.0f), 1.5f);
-            bool overloaded = p.framing && p.load > strength;
+            if (consumed) {   // burned away: nothing left to fall
+                p.state = PieceState::Gone;
+                changed = true;
+                continue;
+            }
+            p.capacity = strength(p);
+            bool overloaded = p.load * G > p.capacity;
             bool unsupported = true;
             for (int s : p.supports)
                 if (pieces_[s].state == PieceState::Standing) { unsupported = false; break; }
-            if (consumed || overloaded || unsupported) {
+            if (overloaded || unsupported) {
                 startFall((int)i);
                 changed = true;
             }
@@ -280,6 +355,7 @@ void Structure::update(Solver& sim, float dt) {
                 ++fallen_;
                 // burning framing lands with its fuel
                 int land = sim.cellAt(cx, cy, floorZ + 0.05f);
+                p.landCell = p.cells.empty() ? -1 : land;
                 if (land >= 0 && !p.cells.empty()) {
                     float each = p.mass / p.cells.size();
                     for (int c : p.cells) sim.moveFuel(c, land, each);
