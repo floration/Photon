@@ -1,20 +1,20 @@
 photon_scene 1
-# NIST "Room Flashover Experiments to Demonstrate the Effectiveness of Barrier
-# Fabrics" (NIST Fire Calorimetry Database): an upholstered sofa in a furnished
-# 3.7 m x 3.7 m x 2.4 m room, ignited by a small propane flame at a polyester
-# pillow. Measured (no barrier fabric, tests 1/3/5/10): 100 kW at 83-124 s,
-# 1 MW at 264-377 s, peak 8.1-9.6 MW at 339-457 s with flashover.
-# Furnishing layout and doorway size here are approximations of the test room
-# (verify against the test report); feet, scene convention.
+# NIST TN 2129 (Zammarano et al. 2020), "Room Flashover Experiments to
+# Demonstrate the Effectiveness of Barrier Fabrics" (NIST Fire Calorimetry
+# Database). 3.7 m x 3.7 m x 2.4 m compartment lined with two layers of 16 mm
+# Type X gypsum, one 2.4 m wide x 2.1 m tall opening centered in the front
+# wall, polyester carpet. Contents from TN 2129 Tables 2-3; positions follow
+# Fig. 7 approximately (verify against the figure). Feet, scene convention.
+# NOTE: NIST's t = 0 is when the 25-30 s igniter flame was removed.
 
-name "NIST sofa flashover room (3.7 x 3.7 x 2.4 m)"
+name "NIST TN 2129 sofa flashover room (3.7 x 3.7 x 2.4 m)"
 units ft
 
 footprint 12.14 12.14
 stories 1
 ceiling_height 7.87
 roof_pitch 6 12
-eave_overhang 1.0
+eave_overhang 0.5
 truss_spacing 2
 stud_spacing 1.333
 attic_vent_ratio 150
@@ -30,12 +30,13 @@ truss_material steel
 gusset_material steel
 
 story 1
-room "Test room"  0 0 12.14 12.14   floor nylon_carpet 2.4   paint 0.80 0.78 0.72
-door ext_door_solid "Doorway"  4.6 0 7.6 0  open
+room "Test room"  0 0 12.14 12.14   floor polyester_fabric 0.47   paint 0.80 0.78 0.72
+cased "Room opening"  2.135 0 10.005 0  head 6.89
 
-place sofa_3seat    "Sofa"           6.07 10.6
-place coffee_table  "Coffee table"   6.07 7.2  rot 90
-place armchair      "Armchair"       1.6  5.5  rot 90
-place end_table     "End table"      11.0 11.0
-place throw_pillow  "Pillow left"     3.4  11.0  z 1.75
-place throw_pillow  "Pillow right"    8.7  11.0  z 1.75
+place nist_sectional    "Sofa"           6.07 10.58
+place throw_pillow      "Pillow right"   9.4  10.9  z 1.48
+place throw_pillow      "Pillow left"    2.9  10.9  z 1.48
+place nist_coffee_table "Coffee table"   6.6  6.4
+place nist_side_table   "Side table"     11.0 10.9
+place nist_bookcase     "Bookcase"       11.7 5.5   rot 270
+place nist_chair        "Armchair"       1.6  3.0   rot 90

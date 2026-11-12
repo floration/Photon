@@ -1,12 +1,13 @@
 photon_case 1
-# Single-room validation against NIST room-flashover sofa tests (no barrier):
+# Single-room validation against NIST TN 2129 / FCD sofa room tests (no barrier).
+# NIST t = 0 is igniter removal (~28 s after ignition): add 28 s to NIST times.
 # 100 kW at 83-124 s, 1 MW at 264-377 s, peak 8.1-9.6 MW at 339-457 s.
 title "Photon vs NIST sofa room flashover (barrier-fabric study, no barrier)"
 scene scenes/nist_sofa_room.txt
 profile realtime
 duration 600
 output out/nist_sofa
-ignite "Pillow left" 0.5 30 side
+ignite "Pillow right" 0.5 28 side
 layer "ROOM" 1.85 1.85 0.0 2.4
 device temp "T_ceiling" 1.85 1.85 2.3
 stop_when_out
