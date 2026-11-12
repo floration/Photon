@@ -175,17 +175,25 @@ float Solver::step(float dtMax) {
     for (Barrier& b : barriers) b.radIn[0] = b.radIn[1] = 0;
 
     stats.pyrolysis = 0;
+    auto tp = std::chrono::steady_clock::now();
+    auto mark = [&](int i) {
+        auto n = std::chrono::steady_clock::now();
+        phaseMs[i] += std::chrono::duration<float, std::milli>(n - tp).count();
+        tp = n;
+    };
+    mark(0);
     injectIgnitions(dt);
-    combustion(dt);
-    flameRadiation();
-    solidsStep(dt);
-    barriersStep(dt);
+    combustion(dt);        mark(1);
+    flameRadiation();      mark(2);
+    solidsStep(dt);        mark(3);
+    barriersStep(dt);      mark(4);
     energyAndExpansion(dt);
-    buoyancy(dt);
-    advectVelocity(dt);
-    project(dt);
-    advectScalars(dt);
-    gatherStats(dt);
+    buoyancy(dt);          mark(5);
+    advectVelocity(dt);    mark(6);
+    project(dt);           mark(7);
+    advectScalars(dt);     mark(8);
+    gatherStats(dt);       mark(9);
+    ++phaseSteps;
     time += dt;
     stats.stepMs = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
     return dt;
@@ -286,7 +294,7 @@ void Solver::flameRadiation() {
     burnList_.clear();
     for (int c = 0; c < N; ++c)
         if (Qr[c] > 0) burnList_.push_back(c);
-    const int R = 2;
+    const int R = 1;   // 3x3x3 near field: R = 2 cost ~60% of the step in big fires
     const float A = dx * dx;
     struct Target { int kind; int idx; int side; float w; };
     std::mutex mtx;

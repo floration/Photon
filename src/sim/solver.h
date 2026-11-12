@@ -135,6 +135,11 @@ public:
     SimStats stats;
     float maxVel = 0;
     int pressureIters = 40;
+    // profiling: accumulated ms per phase (0 setup, 1 combustion, 2 flame radiation,
+    // 3 solids, 4 barriers, 5 energy+buoyancy, 6 velocity advection, 7 pressure,
+    // 8 scalar advection, 9 stats)
+    float phaseMs[10] = {};
+    long phaseSteps = 0;
 
     Solver();
     ~Solver();
