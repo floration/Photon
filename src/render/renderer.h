@@ -23,6 +23,8 @@ struct RenderOptions {
     float sliceZ = 1.5f;
     float clipZ = 1e9f;      // volume is hidden above this height (cutaway)
     float sliceTMin = 293.15f, sliceTMax = 1100.0f;
+    float time = 0;                 // wall-clock seconds, drives display-only flame flicker
+    std::vector<Vec4> fireLights;   // xyz position, w intensity
 };
 
 class Renderer {

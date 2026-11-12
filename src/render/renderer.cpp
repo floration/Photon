@@ -15,12 +15,15 @@ layout(location=2) in vec3 aC;
 layout(location=3) in vec3 aE;
 uniform mat4 uVP;
 out vec3 vN; out vec3 vC; out vec3 vE;
-void main() { vN = aN; vC = aC; vE = aE; gl_Position = uVP * vec4(aPos, 1.0); }
+out vec3 vW;
+void main() { vN = aN; vC = aC; vE = aE; vW = aPos; gl_Position = uVP * vec4(aPos, 1.0); }
 )";
 
 const char* MESH_FS = R"(#version 330 core
-in vec3 vN; in vec3 vC; in vec3 vE;
+in vec3 vN; in vec3 vC; in vec3 vE; in vec3 vW;
 uniform float uAlpha;
+uniform int uNumLights;
+uniform vec4 uLights[8];     // xyz position, w intensity (fire light, viewer-only)
 out vec4 o;
 void main() {
     vec3 n = normalize(vN);
@@ -28,6 +31,14 @@ void main() {
     float d = max(dot(n, L), 0.0);
     float hemi = 0.5 + 0.5 * n.z;
     vec3 c = vC * (0.22 + 0.28 * hemi + 0.5 * d) + vE;
+    vec3 fl = vec3(0.0);
+    for (int i = 0; i < uNumLights; ++i) {
+        vec3 dl = uLights[i].xyz - vW;
+        float r2 = dot(dl, dl);
+        float lam = max(dot(n, dl * inversesqrt(r2 + 1e-6)), 0.0) * 0.85 + 0.15;
+        fl += vec3(1.0, 0.55, 0.22) * uLights[i].w * lam / (1.0 + r2);
+    }
+    c += vC * fl;
     o = vec4(c, uAlpha);
 }
 )";
@@ -54,6 +65,7 @@ uniform mat4 uInvVP;
 uniform vec3 uEye, uBoxMin, uBoxMax;
 uniform float uStep, uClipZ, uSliceZ, uTMin, uTMax;
 uniform int uSmoke, uSlice, uFire;
+uniform float uTime;
 out vec4 o;
 
 vec3 worldAt(vec2 uv, float d) {
@@ -74,6 +86,24 @@ vec3 glowColor(float T) {   // rough incandescence ramp, dull red ~800 K to yell
     return vec3(1.0, 0.25 + 0.6 * t, 0.05 + 0.45 * t * t) * t * t;
 }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float vnoise(vec3 x) {
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+               mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+// Sub-grid flame detail for display only: the solver resolves 20 cm; the
+// flickering tongues inside a burning cell are a rendering effect.
+float flameNoise(vec3 p) {
+    vec3 q = p * vec3(5.0, 5.0, 2.6) - vec3(0.0, 0.0, uTime * 3.2);
+    float n = 0.55 * vnoise(q) + 0.30 * vnoise(q * 2.1 + vec3(0.0, 0.0, -uTime * 2.0)) + 0.15 * vnoise(q * 4.3);
+    return n;
+}
+vec3 flameColor(float k) {   // k 0..1: deep red-orange -> orange -> yellow -> pale yellow
+    return mix(mix(vec3(0.9, 0.18, 0.02), vec3(1.0, 0.5, 0.08), smoothstep(0.0, 0.4, k)),
+               vec3(1.0, 0.9, 0.55), smoothstep(0.45, 1.0, k));
+}
 
 void main() {
     vec3 base = texture(uColor, vUV).rgb;
@@ -120,7 +150,15 @@ void main() {
             vec3 scat = mix(vec3(0.05, 0.05, 0.05), vec3(0.80, 0.78, 0.70), lightFrac);
             vec3 emit = vec3(0.0);
             if (uFire == 1) {
-                emit = vec3(1.0, 0.42, 0.10) * clamp(v.a / 1.0e6, 0.0, 6.0) * 1.6;
+                float q = v.a / 1.0e6;                         // MW/m3 of heat release
+                float hot = smoothstep(1000.0, 1600.0, v.b);   // flame-temperature gas
+                float drive = clamp(q * 0.9, 0.0, 3.0) + hot * 0.9;
+                if (drive > 0.01) {
+                    float n = flameNoise(p);
+                    float shape = smoothstep(0.62 - 0.25 * clamp(drive, 0.0, 1.5), 0.85, n + 0.15 * min(drive, 1.5));
+                    float k = clamp(0.25 * drive + 0.6 * n * shape, 0.0, 1.0);
+                    emit = flameColor(k) * shape * drive * 6.0;
+                }
                 emit += glowColor(v.b) * clamp(sigma * 0.5, 0.0, 1.0) * 2.0;
             }
             col += tr * (a * scat + emit * ds);
@@ -137,8 +175,7 @@ void main() {
             }
         }
     }
-    vec3 c = base * tr + col;
-    c = c / (1.0 + max(c - 1.0, 0.0));
+    vec3 c = base * tr + (vec3(1.0) - exp(-col * 1.1));   // soft-saturate light, keep flame hue
     o = vec4(c, 1.0);
 }
 )";
@@ -340,6 +377,11 @@ void Renderer::render(int w, int h, const Mat4& vp, const Vec3& eye, const Rende
     glUseProgram(meshProg_);
     glUniformMatrix4fv(glGetUniformLocation(meshProg_, "uVP"), 1, GL_FALSE, vp.m);
     glUniform1f(glGetUniformLocation(meshProg_, "uAlpha"), 1.0f);
+    {
+        int nl = opt.fire ? std::min(8, (int)opt.fireLights.size()) : 0;
+        glUniform1i(glGetUniformLocation(meshProg_, "uNumLights"), nl);
+        if (nl > 0) glUniform4fv(glGetUniformLocation(meshProg_, "uLights"), nl, &opt.fireLights[0].x);
+    }
     glBindVertexArray(meshVao_);
     glDrawArrays(GL_TRIANGLES, 0, meshCount_);
     if (glassCount_ > 0) {
@@ -374,6 +416,7 @@ void Renderer::render(int w, int h, const Mat4& vp, const Vec3& eye, const Rende
     glUniform1i(glGetUniformLocation(volProg_, "uSmoke"), opt.smoke ? 1 : 0);
     glUniform1i(glGetUniformLocation(volProg_, "uSlice"), opt.slice ? 1 : 0);
     glUniform1i(glGetUniformLocation(volProg_, "uFire"), opt.fire ? 1 : 0);
+    glUniform1f(glGetUniformLocation(volProg_, "uTime"), opt.time);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, colorTex_);
     glUniform1i(glGetUniformLocation(volProg_, "uColor"), 0);

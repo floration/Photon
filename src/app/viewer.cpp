@@ -499,6 +499,37 @@ void Viewer::uploadVolume() {
         v[2] = s.T[c];
         v[3] = s.hrr[c];
     }
+    // Fire lights for the surface shader (display only): strongest burning
+    // cells, at least 1.6 m apart, each carrying the HRR of the cells nearest it.
+    std::vector<std::pair<float, int>> burning;
+    for (int c = 0; c < s.N; ++c)
+        if (s.hrr[c] > 1e5f) burning.push_back({s.hrr[c], c});
+    std::sort(burning.begin(), burning.end(), [](auto& a, auto& b) { return a.first > b.first; });
+    std::vector<Vec3> lp;
+    auto center = [&](int c) { int i, j, k; s.cellIJK(c, i, j, k); return Vec3(s.ox + (i + 0.5f) * s.dx, s.oy + (j + 0.5f) * s.dx, s.oz + (k + 0.5f) * s.dx); };
+    for (auto& b : burning) {
+        if (lp.size() >= 8) break;
+        Vec3 p = center(b.second);
+        bool far = true;
+        for (const Vec3& q : lp) if (length(p - q) < 1.6f) { far = false; break; }
+        if (far) lp.push_back(p);
+    }
+    std::vector<float> power(lp.size(), 0.0f);
+    const float V = s.dx * s.dx * s.dx;
+    for (auto& b : burning) {
+        Vec3 p = center(b.second);
+        int best = 0;
+        float bd = 1e9f;
+        for (size_t q = 0; q < lp.size(); ++q) { float d = length(p - lp[q]); if (d < bd) { bd = d; best = (int)q; } }
+        if (!lp.empty()) power[best] += b.first * V;
+    }
+    ropt_.fireLights.clear();
+    float tnow = (float)plat_.now();
+    for (size_t q = 0; q < lp.size(); ++q) {
+        float kw = power[q] / 1000.0f;
+        float flicker = 0.85f + 0.1f * std::sin(tnow * 13.0f + q * 2.3f) + 0.05f * std::sin(tnow * 29.0f + q);
+        ropt_.fireLights.push_back({lp[q].x, lp[q].y, lp[q].z, std::clamp(std::sqrt(kw) * 0.16f, 0.0f, 5.0f) * flicker});
+    }
     ren_.setVolume(s.nx, s.ny, s.nz, vol_.data(), Vec3(s.ox, s.oy, s.oz),
                    Vec3(s.ox + s.nx * s.dx, s.oy + s.ny * s.dx, s.oz + s.nz * s.dx));
 }
@@ -581,6 +612,7 @@ void Viewer::run() {
         stepSim(frameDt);
         if (meshDirty_) buildMeshes();
         uploadVolume();
+        ropt_.time = (float)now;
         ropt_.clipZ = hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f;
         if (now - lastHover > 0.1) {
             hover_ = describe(pick(in_.mouseX, in_.mouseY));

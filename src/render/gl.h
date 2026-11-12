@@ -121,6 +121,7 @@ typedef ptrdiff_t GLintptr;
     X(void, glUniform2f, (GLint, GLfloat, GLfloat)) \
     X(void, glUniform3f, (GLint, GLfloat, GLfloat, GLfloat)) \
     X(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    X(void, glUniform4fv, (GLint, GLsizei, const GLfloat*)) \
     X(void, glUniformMatrix4fv, (GLint, GLsizei, GLboolean, const GLfloat*)) \
     X(void, glGenFramebuffers, (GLsizei, GLuint*)) \
     X(void, glDeleteFramebuffers, (GLsizei, const GLuint*)) \
@@ -179,6 +180,7 @@ PHOTON_GL_FUNCS(PHOTON_GL_DECLARE)
 #define glUniform2f p_glUniform2f
 #define glUniform3f p_glUniform3f
 #define glUniform4f p_glUniform4f
+#define glUniform4fv p_glUniform4fv
 #define glUniformMatrix4fv p_glUniformMatrix4fv
 #define glGenFramebuffers p_glGenFramebuffers
 #define glDeleteFramebuffers p_glDeleteFramebuffers
