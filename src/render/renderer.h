@@ -14,7 +14,13 @@ struct Vertex {
     float nrm[3];
     float col[3];
     float emi[3];
+    float pat = 0;   // procedural surface texture (see Pattern)
 };
+
+// Procedural surface textures, generated in the shader from world position:
+// no image files or image libraries.
+enum Pattern : int { PAT_NONE = 0, PAT_WOOD, PAT_OSB, PAT_CARPET, PAT_DRYWALL, PAT_FABRIC, PAT_VINYL_TILE, PAT_SHINGLE,
+                     PAT_SIDING, PAT_CONCRETE, PAT_GRASS, PAT_METAL, PAT_PLASTIC };
 
 struct RenderOptions {
     bool smoke = true;

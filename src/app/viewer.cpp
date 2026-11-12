@@ -105,6 +105,21 @@ private:
     void drawPanels();
     int buildStage_ = 0;           // construction view: show objects up to this stage (0 = simulation view)
     void buildConstructionMesh();
+    float patFor(int mat, int ctx) const {   // ctx: 0 object, 1 floor, 2 exterior wall face
+        if (mat < 0) return PAT_NONE;
+        const std::string& id = lib_.materials[mat].id;
+        if (id == "lumber_spf") return PAT_WOOD;
+        if (id == "osb") return PAT_OSB;
+        if (id == "nylon_carpet" || id == "fiberglass") return PAT_CARPET;
+        if (id == "gypsum_board" || id == "latex_paint") return PAT_DRYWALL;
+        if (id == "fabric" || id == "pu_foam") return PAT_FABRIC;
+        if (id == "pvc_vinyl") return ctx == 1 ? PAT_VINYL_TILE : ctx == 2 ? PAT_SIDING : PAT_PLASTIC;
+        if (id == "asphalt_shingle") return PAT_SHINGLE;
+        if (id == "concrete") return PAT_CONCRETE;
+        if (id == "steel" || id == "aluminum" || id == "copper") return PAT_METAL;
+        if (id == "abs_plastic" || id == "polyethylene" || id == "polypropylene" || id == "ceramic") return PAT_PLASTIC;
+        return PAT_NONE;
+    }
     Ui ui_;
     bool showScene_ = true;
     float sceneScroll_ = 0;
@@ -466,9 +481,10 @@ void Viewer::simLoop() {
     }
 }
 // ----------------------------------------------------------------- meshes --
+float g_pat = 0;   // procedural texture for the next quads
 void addQuad(std::vector<Vertex>& v, Vec3 a, Vec3 b, Vec3 c, Vec3 d, Vec3 n, Vec3 col, Vec3 emi) {
     Vec3 q[6] = {a, b, c, a, c, d};
-    for (const Vec3& p : q) v.push_back({{p.x, p.y, p.z}, {n.x, n.y, n.z}, {col.x, col.y, col.z}, {emi.x, emi.y, emi.z}});
+    for (const Vec3& p : q) v.push_back({{p.x, p.y, p.z}, {n.x, n.y, n.z}, {col.x, col.y, col.z}, {emi.x, emi.y, emi.z}, g_pat});
 }
 void addBox(std::vector<Vertex>& v, Vec3 c, Vec3 ax, Vec3 ay, Vec3 az, Vec3 col, Vec3 emi) {
     // c = center, ax/ay/az = half-extent vectors (right-handed)
@@ -492,6 +508,7 @@ void Viewer::buildMeshes() {
     // ground and slab
     {
         float e = 30;
+        g_pat = PAT_GRASS;
         addQuad(op, Vec3(-e, -e, -0.002f), Vec3(scene_.width + e, -e, -0.002f), Vec3(scene_.width + e, scene_.depth + e, -0.002f),
                 Vec3(-e, scene_.depth + e, -0.002f), Vec3(0, 0, 1), Vec3(0.36f, 0.45f, 0.30f), Vec3());
     }
@@ -518,6 +535,7 @@ void Viewer::buildMeshes() {
                 emi = glow(s.fuelT[c]);
                 z += 0.012f * std::clamp(left, 0.2f, 1.0f);
             }
+            g_pat = covered ? patFor(s.fuelMat[c], 1) : PAT_CONCRETE;
             addQuad(op, Vec3(x0, y0, z), Vec3(x0 + dx, y0, z), Vec3(x0 + dx, y0 + dx, z), Vec3(x0, y0 + dx, z), Vec3(0, 0, 1), col, emi);
         }
     // barriers, drawn as the real pieces they stand for: each exposed layer at
@@ -563,6 +581,7 @@ void Viewer::buildMeshes() {
         float sA = surf(b.aIsInside ? 0 : 1), sB = surf(b.aIsInside ? 1 : 0);   // surface facing cellA / cellB
         // styling per side
         Vec3 colSide[2], emiSide[2];
+        float patSide[2] = {0, 0};
         for (int side = 0; side < 2; ++side) {
             int asmSide = (side == 0) == b.aIsInside ? 0 : 1;
             int layer = asmSide == 0 ? b.front : b.back;
@@ -584,6 +603,12 @@ void Viewer::buildMeshes() {
             }
             colSide[side] = col;
             emiSide[side] = glow(b.T[asmSide]);
+            bool extFace = (b.kind == BarrierKind::Wall || b.kind == BarrierKind::Gable) && std::string(m.id) == "pvc_vinyl";
+            patSide[side] = patFor(as.layers[layer].material, extFace ? 2 : 0);
+            if (b.kind == BarrierKind::Door && std::string(m.id) == "osb") {   // hollow-core doors: painted hardboard skins
+                colSide[side] = Vec3(0.93f, 0.92f, 0.88f) * kk;
+                patSide[side] = PAT_PLASTIC;
+            }
         }
         // ---- roof top faces: sloped tiles following the real roof plane
         if (b.kind == BarrierKind::Roof) {
@@ -597,7 +622,9 @@ void Viewer::buildMeshes() {
             Vec3 nUp = normalize(cross(p10 - p00, p01 - p00));
             Vec3 lift = nUp * tk;
             // outside (shingles) above, deck underside below
+            g_pat = patSide[1];
             addQuad(op, p00 + lift, p10 + lift, p11 + lift, p01 + lift, nUp, colSide[1], emiSide[1]);
+            g_pat = patSide[0];
             addQuad(op, p00, p01, p11, p10, nUp * -1, colSide[0], emiSide[0]);
             continue;
         }
@@ -631,18 +658,23 @@ void Viewer::buildMeshes() {
         if (ax == 0 && (h0 != dx || h1 != dx)) {
             Vec3 W0 = w * h0, W1 = w * h1;
             Vec3 qa = p0 + n * sA, qb = p0 + n * sB;
+            g_pat = patSide[1];
             addQuad(op, qb, qb + U, qb + U + W1, qb + W0, n, colSide[1], emiSide[1]);
+            g_pat = patSide[0];
             addQuad(op, qa, qa + W0, qa + U + W1, qa + U, n * -1, colSide[0], emiSide[0]);
             continue;
         }
         if (b.kind == BarrierKind::Window) {
             float mid = 0.5f * (sA + sB);
             Vec3 q = p0 + n * mid;
+            g_pat = PAT_NONE;
             addQuad(glass, q, q + U, q + U + W, q + W, n, Vec3(0.55f, 0.72f, 0.85f), emiSide[0]);
             continue;
         }
         Vec3 qa = p0 + n * sA, qb = p0 + n * sB;
+        g_pat = patSide[1];
         addQuad(op, qb, qb + U, qb + U + W, qb + W, n, colSide[1], emiSide[1]);          // faces cellB
+        g_pat = patSide[0];
         addQuad(op, qa, qa + W, qa + U + W, qa + U, n * -1, colSide[0], emiSide[0]);     // faces cellA
         // edges where the neighbouring piece in this plane is missing (holes, openings, burn-through)
         if (std::fabs(sB - sA) > 0.004f) {
@@ -685,6 +717,7 @@ void Viewer::buildMeshes() {
         for (const Part& pt : scene_.items[it].parts) {
             if (pt.box.z0 >= zc) continue;
             const Material& m = lib_.materials[pt.material];
+            g_pat = patFor(pt.material, 0);
             Vec3 c(0.5f * (pt.box.x0 + pt.box.x1), 0.5f * (pt.box.y0 + pt.box.y1), 0.5f * (pt.box.z0 + pt.box.z1));
             addBox(op, c, Vec3(0.5f * (pt.box.x1 - pt.box.x0), 0, 0), Vec3(0, 0.5f * (pt.box.y1 - pt.box.y0), 0),
                    Vec3(0, 0, 0.5f * (pt.box.z1 - pt.box.z0)), Vec3(m.color[0], m.color[1], m.color[2]), Vec3());
@@ -710,6 +743,7 @@ void Viewer::buildMeshes() {
                 (d == 4 && k == 0) || (d == 5 && k == s.nz - 1)) return d != 4;
             return !s.blocked[c + off[d]];
         };
+        g_pat = patFor(s.fuelMat[c], 0);
         if (exposed(0)) addQuad(op, P[0], P[4], P[6], P[2], Vec3(-1, 0, 0), col, e);
         if (exposed(1)) addQuad(op, P[1], P[3], P[7], P[5], Vec3(1, 0, 0), col, e);
         if (exposed(2)) addQuad(op, P[0], P[1], P[5], P[4], Vec3(0, -1, 0), col, e);
@@ -757,6 +791,7 @@ void Viewer::buildMeshes() {
                     e = glow(s.fuelT[cc]);
                 }
             }
+            g_pat = mb.kind == MemberKind::Gusset ? PAT_METAL : PAT_WOOD;
             addBox(op, c, dn * (0.5f * L / segs), side * (0.5f * mb.width), t * (0.5f * mb.depth), col, e);
         }
     }
@@ -773,6 +808,7 @@ void Viewer::buildConstructionMesh() {
     op.reserve(800000);
     {
         float e = 30;
+        g_pat = PAT_GRASS;
         addQuad(op, Vec3(-e, -e, -0.12f), Vec3(scene_.width + e, -e, -0.12f), Vec3(scene_.width + e, scene_.depth + e, -0.12f),
                 Vec3(-e, scene_.depth + e, -0.12f), Vec3(0, 0, 1), Vec3(0.36f, 0.45f, 0.30f), Vec3());
     }
@@ -796,6 +832,7 @@ void Viewer::buildConstructionMesh() {
         }
         Vec3 c(o.c[0], o.c[1], o.c[2]);
         Vec3 ax = Vec3(o.u[0], o.u[1], o.u[2]) * o.hu, ay = Vec3(o.v[0], o.v[1], o.v[2]) * o.hv, az = Vec3(o.n[0], o.n[1], o.n[2]) * o.hn;
+        g_pat = patFor(o.material, o.kind == "floor covering" ? 1 : (o.kind == "siding course" ? 2 : 0));
         if (o.kind == "window unit") {
             addBox(glass, c, ax, ay, az, Vec3(0.55f, 0.72f, 0.85f), Vec3());
             continue;

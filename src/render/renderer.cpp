@@ -13,15 +13,74 @@ layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aN;
 layout(location=2) in vec3 aC;
 layout(location=3) in vec3 aE;
+layout(location=4) in float aP;
 uniform mat4 uVP;
 out vec3 vN; out vec3 vC; out vec3 vE;
 out vec3 vW;
-void main() { vN = aN; vC = aC; vE = aE; vW = aPos; gl_Position = uVP * vec4(aPos, 1.0); }
+flat out int vP;
+void main() { vN = aN; vC = aC; vE = aE; vW = aPos; vP = int(aP + 0.5); gl_Position = uVP * vec4(aPos, 1.0); }
 )";
 
 const char* MESH_FS = R"(#version 330 core
 in vec3 vN; in vec3 vC; in vec3 vE; in vec3 vW;
+flat in int vP;
 uniform float uAlpha;
+float hh(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float vn(vec3 x) {
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hh(i), hh(i + vec3(1, 0, 0)), f.x), mix(hh(i + vec3(0, 1, 0)), hh(i + vec3(1, 1, 0)), f.x), f.y),
+               mix(mix(hh(i + vec3(0, 0, 1)), hh(i + vec3(1, 0, 1)), f.x), mix(hh(i + vec3(0, 1, 1)), hh(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+float fbm(vec3 x) { return 0.5 * vn(x) + 0.3 * vn(x * 2.03) + 0.2 * vn(x * 4.1); }
+// procedural surface textures (multiplier on the base color)
+float pattern(int id, vec3 p, vec3 n) {
+    vec3 an = abs(n);
+    vec2 uv = an.z > 0.5 ? p.xy : (an.x > an.y ? p.yz : p.xz);   // planar projection by face direction
+    if (id == 1) {   // wood: grain lines with growth-ring wobble
+        float w = uv.x * 4.0 + uv.y * 60.0 + fbm(vec3(uv * vec2(4.0, 0.8), 1.0)) * 8.0;
+        float ring = 0.5 + 0.5 * sin(w * 6.0);
+        return 0.9 + 0.1 * ring + 0.06 * (vn(vec3(uv * 40.0, 2.0)) - 0.5);
+    }
+    if (id == 2) {   // OSB: overlapping strands
+        float s = 0.0;
+        for (int k = 0; k < 3; ++k) {
+            float a = float(k) * 2.1;
+            vec2 r = mat2(cos(a), -sin(a), sin(a), cos(a)) * uv;
+            s += vn(vec3(r * vec2(6.0, 40.0), float(k)));
+        }
+        return 0.72 + 0.32 * (s / 3.0);
+    }
+    if (id == 3) return 0.82 + 0.22 * vn(p * 140.0) + 0.06 * (fbm(p * 3.0) - 0.5);     // carpet pile
+    if (id == 4) return 0.96 + 0.05 * vn(p * 70.0);                                      // drywall / paint
+    if (id == 5) {   // woven fabric
+        float wv = 0.5 + 0.25 * (sin(uv.x * 700.0) + sin(uv.y * 700.0));
+        return 0.86 + 0.12 * wv + 0.06 * (fbm(p * 8.0) - 0.5);
+    }
+    if (id == 6) {   // 12 in vinyl tile with grout lines
+        vec2 g = abs(fract(p.xy / 0.3048) - 0.5);
+        float line = smoothstep(0.485, 0.495, max(g.x, g.y));
+        float tile = 0.92 + 0.12 * hh(floor(vec3(p.xy / 0.3048, 3.0)));
+        return tile * (1.0 - 0.35 * line) + 0.04 * (vn(p * 50.0) - 0.5);
+    }
+    if (id == 7) {   // asphalt shingles: courses with offset tab cuts and granules
+        float row = p.z / 0.1;
+        float fr = fract(row);
+        float tab = fract(p.x / 0.33 + 0.5 * floor(row));
+        float edge = smoothstep(0.0, 0.08, fr) * (0.75 + 0.25 * fr);
+        float cut = smoothstep(0.0, 0.02, tab) * smoothstep(0.0, 0.02, 1.0 - tab);
+        return (0.55 + 0.45 * edge) * (0.8 + 0.2 * cut) * (0.85 + 0.3 * vn(p * 120.0));
+    }
+    if (id == 8) {   // lap siding: 8 in courses, shadow under each lap
+        float f = fract(p.z / 0.2032);
+        return 0.78 + 0.26 * smoothstep(0.0, 0.25, f) + 0.03 * vn(p * 30.0);
+    }
+    if (id == 9) return 0.86 + 0.18 * fbm(p * 6.0) + 0.06 * (vn(p * 90.0) - 0.5);       // concrete
+    if (id == 10) return 0.75 + 0.35 * fbm(vec3(p.xy * 1.5, 0.0)) + 0.1 * (vn(vec3(p.xy * 40.0, 1.0)) - 0.5);   // grass
+    if (id == 11) return 0.92 + 0.1 * vn(vec3(uv * vec2(200.0, 3.0), 4.0));             // brushed metal
+    if (id == 12) return 0.97 + 0.04 * vn(p * 30.0);                                     // plastic
+    return 1.0;
+}
 uniform int uNumLights;
 uniform vec4 uLights[8];     // xyz position, w intensity (fire light, viewer-only)
 out vec4 o;
@@ -30,7 +89,8 @@ void main() {
     vec3 L = normalize(vec3(0.35, 0.25, 0.9));
     float d = max(dot(n, L), 0.0);
     float hemi = 0.5 + 0.5 * n.z;
-    vec3 c = vC * (0.42 + 0.23 * hemi + 0.35 * d) + vE;   // generous ambient: interiors have no shadowing yet
+    vec3 base = vC * pattern(vP, vW, n);
+    vec3 c = base * (0.42 + 0.23 * hemi + 0.35 * d) + vE;   // generous ambient: interiors have no shadowing yet
     vec3 fl = vec3(0.0);
     for (int i = 0; i < uNumLights; ++i) {
         vec3 dl = uLights[i].xyz - vW;
@@ -38,7 +98,7 @@ void main() {
         float lam = max(dot(n, dl * inversesqrt(r2 + 1e-6)), 0.0) * 0.85 + 0.15;
         fl += vec3(1.0, 0.55, 0.22) * uLights[i].w * lam / (1.0 + r2);
     }
-    c += vC * fl;
+    c += base * fl;
     o = vec4(c, uAlpha);
 }
 )";
@@ -290,6 +350,8 @@ void setupMeshVao(unsigned& vao, unsigned& vbo) {
         glEnableVertexAttribArray(a);
         glVertexAttribPointer(a, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)(sizeof(float) * 3 * a));
     }
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex), (const void*)(sizeof(float) * 12));
     glBindVertexArray(0);
 }
 
