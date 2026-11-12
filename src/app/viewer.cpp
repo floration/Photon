@@ -74,6 +74,7 @@ private:
     std::mutex simMtx_;
     std::thread simThread_;
     std::atomic<bool> quit_{false};
+    std::atomic<bool> uiWants_{false};   // UI thread is waiting for the lock: solver steps aside
     std::atomic<float> simRate_{1.0f};   // achieved / requested speed
     void simLoop();
     int paintMat_ = -1;
@@ -360,6 +361,8 @@ void Viewer::simLoop() {
         if (!maxSpeed) debt = std::min(debt + wall * speed, 0.5 * speed + 0.1);
         winWall += wall;
         if (!maxSpeed && debt <= 0) { std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
+        // let the UI thread in first; std::mutex is not fair
+        while (uiWants_.load() && !quit_) std::this_thread::yield();
         float dt;
         {
             std::lock_guard<std::mutex> lk(simMtx_);
@@ -665,8 +668,10 @@ void Viewer::run() {
         float frameDt = (float)(now - last);
         last = now;
         bool done = false;
+        uiWants_ = true;
         {
             std::lock_guard<std::mutex> lk(simMtx_);
+            uiWants_ = false;
             if (!sim_) break;
             updateCamera();
             handleInput(frameDt);

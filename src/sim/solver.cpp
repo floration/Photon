@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <mutex>
+#include <thread>
 
 namespace photon {
 
@@ -37,7 +38,8 @@ const char* barrierKindName(BarrierKind k) {
     return "?";
 }
 
-Solver::Solver() : pool_(std::make_unique<JobPool>()) {}
+// Leave two hardware threads for the viewer's UI/render thread and the OS.
+Solver::Solver() : pool_(std::make_unique<JobPool>(std::max(1, (int)std::thread::hardware_concurrency() - 2))) {}
 Solver::~Solver() = default;
 
 int Solver::cellAt(float x, float y, float z) const {
