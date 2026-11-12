@@ -24,8 +24,9 @@ constexpr int WGL_CONTEXT_MINOR_VERSION_ARB = 0x2092;
 constexpr int WGL_CONTEXT_PROFILE_MASK_ARB = 0x9126;
 constexpr int WGL_CONTEXT_CORE_PROFILE_BIT_ARB = 0x00000001;
 
-void mapKey(WPARAM vk) {
-    if (!g_in) return;
+bool g_down[KEY_COUNT] = {};
+
+int keyIndex(WPARAM vk) {
     int k = -1;
     if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) k = (int)vk;
     else switch (vk) {
@@ -41,17 +42,37 @@ void mapKey(WPARAM vk) {
         case VK_RIGHT: k = KEY_RIGHT; break;
         case VK_UP: k = KEY_UP; break;
         case VK_DOWN: k = KEY_DOWN; break;
+        case VK_F2: k = KEY_F2; break;
+        case VK_F3: k = KEY_F3; break;
+        case VK_F4: k = KEY_F4; break;
+        case VK_F5: k = KEY_F5; break;
+        case VK_F6: k = KEY_F6; break;
+        case VK_SHIFT: k = KEY_SHIFT; break;
+        case VK_CONTROL: k = KEY_CTRL; break;
         default: break;
     }
-    if (k >= 0) g_in->keyPressed[k] = true;
+    return k;
 }
 
 LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CLOSE: g_closed = true; return 0;
     case WM_SIZE: g_w = LOWORD(lp); g_h = HIWORD(lp); return 0;
-    case WM_KEYDOWN: case WM_SYSKEYDOWN:
-        if (!(lp & (1 << 30))) mapKey(wp);
+    case WM_KEYDOWN: case WM_SYSKEYDOWN: {
+        int k = keyIndex(wp);
+        if (k >= 0) {
+            if (!(lp & (1 << 30)) && g_in) g_in->keyPressed[k] = true;
+            g_down[k] = true;
+        }
+        return 0;
+    }
+    case WM_KEYUP: case WM_SYSKEYUP: {
+        int k = keyIndex(wp);
+        if (k >= 0) g_down[k] = false;
+        return 0;
+    }
+    case WM_KILLFOCUS:
+        for (bool& d : g_down) d = false;
         return 0;
     case WM_MOUSEWHEEL:
         if (g_in) g_in->wheel += GET_WHEEL_DELTA_WPARAM(wp) / 120.0f;
@@ -163,6 +184,7 @@ bool Platform::pump(Input& in) {
     in.mouseY = pt.y;
     in.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     in.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    std::memcpy(in.keyDown, g_down, sizeof(g_down));
     w_ = g_w;
     h_ = g_h;
     return !g_closed;

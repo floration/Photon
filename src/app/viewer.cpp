@@ -54,8 +54,8 @@ private:
     std::unique_ptr<Solver> sim_;
     Input in_;
     // camera
-    Vec3 target_;
-    float yaw_ = -0.9f, pitch_ = 0.75f, dist_ = 24.0f;
+    float yaw_ = 0, pitch_ = 0, flySpeed_ = 5.0f;   // m/s
+    void lookFrom(Vec3 eye, Vec3 target);
     Mat4 vp_;
     Vec3 eye_;
     // toggles
@@ -99,13 +99,21 @@ bool Viewer::init(const std::string& scenePath, const std::string& demo, std::st
     if (!ren_.init(plat_, err)) return false;
     resetSim();
     if (!sim_) { err = "solver build failed"; return false; }
-    target_ = Vec3(scene_.width * 0.5f, scene_.depth * 0.5f, 1.0f);
+    lookFrom(Vec3(scene_.width * 0.5f + 9.0f, -10.0f, 13.0f), Vec3(scene_.width * 0.5f, scene_.depth * 0.5f, 0.5f));
     if (!demo_.empty()) {
         help_ = false;
         speedIdx_ = NSPEED - 1;
+        lookFrom(Vec3(10.5f, -4.5f, 8.5f), Vec3(3.5f, 3.0f, 0.5f));
         igniteItem("Sofa", 10.0f, 120.0f);
     }
     return true;
+}
+
+void Viewer::lookFrom(Vec3 eye, Vec3 target) {
+    eye_ = eye;
+    Vec3 d = normalize(target - eye);
+    yaw_ = std::atan2(d.y, d.x);
+    pitch_ = std::asin(std::clamp(d.z, -1.0f, 1.0f));
 }
 
 void Viewer::igniteItem(const std::string& name, float kw, float seconds) {
@@ -126,9 +134,9 @@ void Viewer::resetSim() {
 
 void Viewer::updateCamera() {
     float cp = std::cos(pitch_), sp = std::sin(pitch_);
-    eye_ = target_ + Vec3(std::cos(yaw_) * cp, std::sin(yaw_) * cp, sp) * dist_;
+    Vec3 fwd(std::cos(yaw_) * cp, std::sin(yaw_) * cp, sp);
     float aspect = plat_.height() > 0 ? (float)plat_.width() / plat_.height() : 1.0f;
-    vp_ = perspective(0.85f, aspect, 0.1f, 300.0f) * lookAt(eye_, target_, Vec3(0, 0, 1));
+    vp_ = perspective(0.95f, aspect, 0.05f, 300.0f) * lookAt(eye_, eye_ + fwd, Vec3(0, 0, 1));
 }
 
 bool Viewer::barrierVisible(const Barrier& b) const {
@@ -252,37 +260,46 @@ void Viewer::handleInput(float frameDt) {
     if (in.keyPressed['1']) source_ = 0;
     if (in.keyPressed['2']) source_ = 1;
     if (in.keyPressed['3']) source_ = 2;
-    if (in.keyPressed['R']) { hideRoof_ = !hideRoof_; meshDirty_ = true; }
-    if (in.keyPressed['C']) { hideCeiling_ = !hideCeiling_; meshDirty_ = true; }
-    if (in.keyPressed['F']) { framing_ = !framing_; meshDirty_ = true; }
-    if (in.keyPressed['S']) ropt_.smoke = !ropt_.smoke;
-    if (in.keyPressed['T']) ropt_.slice = !ropt_.slice;
+    if (in.keyPressed['R'] || in.keyPressed[KEY_F2]) { hideRoof_ = !hideRoof_; meshDirty_ = true; }
+    if (in.keyPressed['C'] || in.keyPressed[KEY_F3]) { hideCeiling_ = !hideCeiling_; meshDirty_ = true; }
+    if (in.keyPressed['F'] || in.keyPressed[KEY_F4]) { framing_ = !framing_; meshDirty_ = true; }
+    if (in.keyPressed['X'] || in.keyPressed[KEY_F5]) ropt_.smoke = !ropt_.smoke;
+    if (in.keyPressed['T'] || in.keyPressed[KEY_F6]) ropt_.slice = !ropt_.slice;
     if (in.keyPressed['H'] || in.keyPressed[KEY_F1]) help_ = !help_;
     if (in.keyPressed[KEY_PAGEUP]) ropt_.sliceZ = std::min(ropt_.sliceZ + 0.2f, scene_.ridgeHeight());
     if (in.keyPressed[KEY_PAGEDOWN]) ropt_.sliceZ = std::max(ropt_.sliceZ - 0.2f, 0.1f);
     if (in.keyPressed[KEY_PLUS]) speedIdx_ = std::min(speedIdx_ + 1, NSPEED - 1);
     if (in.keyPressed[KEY_MINUS]) speedIdx_ = std::max(speedIdx_ - 1, 0);
     if (in.keyPressed[KEY_BACKSPACE]) resetSim();
-    if (in.keyPressed[KEY_LEFT]) yaw_ -= 0.15f;
-    if (in.keyPressed[KEY_RIGHT]) yaw_ += 0.15f;
-    if (in.keyPressed[KEY_UP]) pitch_ = std::min(pitch_ + 0.1f, 1.5f);
-    if (in.keyPressed[KEY_DOWN]) pitch_ = std::max(pitch_ - 0.1f, -0.2f);
+    // ---- fly camera: WASD move, Q/E down/up, Shift fast, Ctrl slow,
+    // hold either mouse button and drag to look, wheel moves forward/back
+    float dt = std::min(frameDt, 0.1f);
+    float turn = 1.8f * dt;
+    if (in.keyDown[KEY_LEFT]) yaw_ += turn;
+    if (in.keyDown[KEY_RIGHT]) yaw_ -= turn;
+    if (in.keyDown[KEY_UP]) pitch_ += turn;
+    if (in.keyDown[KEY_DOWN]) pitch_ -= turn;
+    Vec3 fwd = Vec3(std::cos(pitch_) * std::cos(yaw_), std::cos(pitch_) * std::sin(yaw_), std::sin(pitch_));
+    Vec3 right = normalize(cross(fwd, Vec3(0, 0, 1)));
+    float speed = flySpeed_ * (in.keyDown[KEY_SHIFT] ? 4.0f : 1.0f) * (in.keyDown[KEY_CTRL] ? 0.25f : 1.0f);
+    Vec3 move;
+    if (in.keyDown['W']) move += fwd;
+    if (in.keyDown['S']) move += fwd * -1;
+    if (in.keyDown['D']) move += right;
+    if (in.keyDown['A']) move += right * -1;
+    if (in.keyDown['E']) move += Vec3(0, 0, 1);
+    if (in.keyDown['Q']) move += Vec3(0, 0, -1);
+    if (length(move) > 0) eye_ += normalize(move) * (speed * dt);
+    if (in.wheel != 0) eye_ += fwd * (in.wheel * 0.6f * (in.keyDown[KEY_SHIFT] ? 4.0f : 1.0f));
+    eye_.z = std::max(eye_.z, 0.15f);
 
     for (int b = 0; b < 3; ++b)
         if (in.pressed[b] && dragButton_ < 0) { dragButton_ = b; dragPixels_ = 0; }
     if (dragButton_ >= 0) {
         dragPixels_ += std::abs(in.dMouseX) + std::abs(in.dMouseY);
         if (dragPixels_ > 4) {
-            if (dragButton_ == 0) {
-                yaw_ -= in.dMouseX * 0.006f;
-                pitch_ = std::clamp(pitch_ + in.dMouseY * 0.006f, -0.2f, 1.55f);
-            } else {
-                Vec3 fwd = normalize(target_ - eye_);
-                Vec3 right = normalize(cross(fwd, Vec3(0, 0, 1)));
-                Vec3 up = cross(right, fwd);
-                float k = dist_ * 0.0012f;
-                target_ = target_ + right * (-in.dMouseX * k) + up * (in.dMouseY * k);
-            }
+            yaw_ -= in.dMouseX * 0.0035f;
+            pitch_ -= in.dMouseY * 0.0035f;
         }
         if (in.released[dragButton_]) {
             if (dragPixels_ <= 4) {
@@ -302,8 +319,7 @@ void Viewer::handleInput(float frameDt) {
             dragButton_ = -1;
         }
     }
-    if (in.wheel != 0) dist_ = std::clamp(dist_ * std::pow(0.88f, in.wheel), 2.0f, 80.0f);
-    (void)frameDt;
+    pitch_ = std::clamp(pitch_, -1.55f, 1.55f);
 }
 
 void Viewer::stepSim(float frameDt) {
@@ -505,7 +521,7 @@ void Viewer::drawOverlay() {
     y += lh;
     std::string tog = std::string("Source [1-3]: ") + SOURCES[source_].name + "   roof " + (hideRoof_ ? "hidden" : "shown") +
                       " [R]  ceiling " + (hideCeiling_ ? "hidden" : "shown") + " [C]  framing " + (framing_ ? "on" : "off") +
-                      " [F]  smoke " + (ropt_.smoke ? "on" : "off") + " [S]  temp slice " +
+                      " [F]  smoke " + (ropt_.smoke ? "on" : "off") + " [X]  temp slice " +
                       (ropt_.slice ? fmt("%.1f m", ropt_.sliceZ) : std::string("off")) + " [T, PgUp/PgDn]";
     ren_.text(x, y, tog, 0.8f, 0.9f, 1.0f);
     // hover line
@@ -528,8 +544,8 @@ void Viewer::drawOverlay() {
         const char* lines[] = {
             "Left-click a surface        start a fire with the selected source (solver decides if it ignites)",
             "Right-click a door/window   open or close a door, break a window",
-            "Left-drag / right-drag      orbit / pan     wheel  zoom     arrows  rotate",
-            "Space  pause     +/-  speed     Backspace  reset the house     H  hide this help",
+            "WASD move  Q/E down/up  Shift fast  Ctrl slow   hold mouse + drag  look   wheel  dolly   arrows  turn",
+            "Space  pause   +/-  speed   R roof  C ceiling  F framing  X smoke  T temp slice   Backspace reset   H help",
             "Doors and windows start as in the scene file. Closed house fires can starve for oxygen.",
         };
         float hy = lh * 3 + 24;

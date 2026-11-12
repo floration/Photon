@@ -10,7 +10,7 @@ namespace photon {
 
 enum Key : int {
     KEY_ESCAPE = 256, KEY_SPACE, KEY_PAGEUP, KEY_PAGEDOWN, KEY_BACKSPACE, KEY_F1, KEY_PLUS, KEY_MINUS,
-    KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_COUNT
+    KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_SHIFT, KEY_CTRL, KEY_COUNT
 };
 
 struct Input {
@@ -21,6 +21,7 @@ struct Input {
     bool pressed[3] = {}, released[3] = {};
     bool shift = false, ctrl = false;
     bool keyPressed[KEY_COUNT] = {}; // ASCII upper-case letters and digits, plus Key values
+    bool keyDown[KEY_COUNT] = {};    // held state, same indexing
 };
 
 struct FontAtlas {

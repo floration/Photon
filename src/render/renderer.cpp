@@ -103,8 +103,10 @@ void main() {
             if (!sliceDone && t >= tS) {
                 vec4 sv = texture(uVol, (ro + rd * tS - uBoxMin) / (uBoxMax - uBoxMin));
                 if (sv.b > 150.0) {
-                    col += tr * 0.9 * heatmap((sv.b - uTMin) / (uTMax - uTMin));
-                    tr *= 0.1;
+                    float tn = (sv.b - uTMin) / (uTMax - uTMin);
+                    float sa = mix(0.12, 0.88, smoothstep(0.0, 0.2, tn));
+                    col += tr * sa * heatmap(tn);
+                    tr *= 1.0 - sa;
                 }
                 sliceDone = true;
             }
@@ -124,7 +126,12 @@ void main() {
         }
         if (!sliceDone) {
             vec4 sv = texture(uVol, (ro + rd * tS - uBoxMin) / (uBoxMax - uBoxMin));
-            if (sv.b > 150.0) { col += tr * 0.9 * heatmap((sv.b - uTMin) / (uTMax - uTMin)); tr *= 0.1; }
+            if (sv.b > 150.0) {
+                float tn = (sv.b - uTMin) / (uTMax - uTMin);
+                float sa = mix(0.12, 0.88, smoothstep(0.0, 0.2, tn));
+                col += tr * sa * heatmap(tn);
+                tr *= 1.0 - sa;
+            }
         }
     }
     vec3 c = base * tr + col;
