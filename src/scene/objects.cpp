@@ -166,7 +166,9 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
     const Fixture* panel = findFixture("panel");
     P3 panelP = panel ? P3{panel->x, panel->y, storyBase(panel->story) + 1.5f} : P3{0.3f, 0.3f, 1.5f};
     int panelStory = panel ? panel->story : 0;
-    auto ceilingRunZ = [&](int st) { return storyBase(st) + H + 0.12f; };   // joist space or attic
+    // horizontal cable runs: in the joist space or attic above the story; under a half story's sloped roof
+    // they run in the floor joists below instead and come up through the walls
+    auto ceilingRunZ = [&](int st) { return (halfStory && st == stories - 1) ? storyBase(st) - 0.12f : storyBase(st) + H + 0.12f; };
     // Manhattan route at a given height: up/down, along x, along y, then to the end
     auto route = [&](P3 a, P3 b, float zRun) {
         std::vector<P3> p;
@@ -370,7 +372,7 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
     if (stackFx) {
         float D = depth;
         float run = stack.y <= 0.5f * D ? stack.y : D - stack.y;
-        float roofZ = roofBase() + 3.5f * IN * std::sqrt(1 + pitch * pitch) + pitch * run;
+        float roofZ = roofBase() + (halfStory ? 7.25f : 3.5f) * IN * std::sqrt(1 + pitch * pitch) + pitch * run;
         Run st{"Drain/waste/vent stack, PVC DWV 3 in", "drain", mat("pvc_vinyl"), dwv3.first, dwv3.second, {}};
         st.pts = {{stack.x, stack.y, -0.4f}, {stack.x, stack.y, roofZ + 0.3f}};
         runs.push_back(st);
@@ -496,10 +498,13 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
             float ya = side == 0 ? kneeInset : depth - kneeInset;
             float len = (slopedRun() - kneeInset) / cosT;
             float zA = roofUnderside(ya) + 0.5f * 0.184f * cosT;
-            float c[3] = {0.5f * width, ya + sgn * 0.5f * len * cosT, zA + 0.5f * len * sinT};
             float u[3] = {1, 0, 0}, v[3] = {0, sgn * cosT, sinT};
-            add(std::string("R-30 fiberglass batts, sloped ceiling rafter bays (") + (side == 0 ? "south)" : "north)"), "insulation batt",
-                mat("fiberglass"), stories - 1, c, u, v, 0.5f * width, 0.5f * len, 0.5f * 0.184f);
+            for (float x = 0.75f * IN; x + 0.1f < width; x += rafterSpacing) {   // one batt per rafter bay
+                float x0 = x + 0.75f * IN, x1 = std::min(width - 0.75f * IN, x + rafterSpacing - 0.75f * IN);
+                float c[3] = {0.5f * (x0 + x1), ya + sgn * 0.5f * len * cosT, zA + 0.5f * len * sinT};
+                add("R-30 fiberglass batt, sloped ceiling " + std::to_string(++k), "insulation batt", mat("fiberglass"), stories - 1, c, u, v,
+                    0.5f * (x1 - x0), 0.5f * len, 0.5f * 0.184f);
+            }
         }
     }
 
@@ -627,7 +632,7 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
     stage = STAGE_ROOFING;
     const float RB = roofBase(), D = depth, oh = eaveOverhang;
     const float cosT = 1.0f / std::sqrt(1 + pitch * pitch), sinT = pitch * cosT;
-    const float chord = 3.5f * IN / cosT;
+    const float chord = (halfStory ? 7.25f : 3.5f) * IN / cosT;   // deck sits on 2x8 rafters or 2x4 truss chords
     {
         const Assembly& as = lib.assemblies[roof];
         const float slopeLen = (0.5f * D + oh) / cosT;
@@ -646,10 +651,33 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
                 const Material& m = lib.materials[ly.material];
                 float t = ly.thickness, lift = off + 0.5f * t;
                 if (m.density > 1000) {
-                    float sm = 0.5f * slopeLen;
-                    float c[3] = {0.5f * width, ystart + sgn * sm * cosT + nrm[1] * lift, z0 + sm * sinT + nrm[2] * lift};
-                    add(m.name + (side == 0 ? " (south slope)" : " (north slope)"), "roofing", ly.material, stories - 1, c, u, v,
-                        0.5f * width, 0.5f * slopeLen, 0.5f * t);
+                    // individual laminated shingles, 13-1/4 x 39-3/8 in at 5-5/8 in exposure, each course
+                    // offset; the visible exposure is modelled (each shingle laps the one below)
+                    const auto sh = comp("shingle", 13.25f, 39.375f);
+                    const float expo = 5.625f * IN, shW = sh.second, shH = sh.first;
+                    int k = 0, course = 0;
+                    for (float sl = 0; sl < slopeLen - 0.01f; sl += expo, ++course) {
+                        float se = std::min(slopeLen, sl + shH);
+                        float off = (course % 2) ? 0.5f * shW : 0.0f;
+                        for (float x = -off; x < width - 0.01f; x += shW) {
+                            float x0 = std::max(0.0f, x), x1 = std::min(width, x + shW);
+                            if (x1 - x0 < 0.02f) continue;
+                            float sm = 0.5f * (sl + se);
+                            float c[3] = {0.5f * (x0 + x1), ystart + sgn * sm * cosT + nrm[1] * lift, z0 + sm * sinT + nrm[2] * lift};
+                            add("Shingle " + std::to_string(++k) + (side == 0 ? " (south)" : " (north)"), "shingle", ly.material, stories - 1,
+                                c, u, v, 0.5f * (x1 - x0), 0.5f * (se - sl), 0.5f * t);
+                        }
+                    }
+                    if (side == 1) {   // ridge cap: 12 in pieces at 5 in exposure along the ridge
+                        float zr = RB + chord + pitch * 0.5f * D + t + 0.01f;
+                        int r = 0;
+                        for (float x = 0; x < width - 0.01f; x += 5 * IN) {
+                            float x1 = std::min(width, x + 12 * IN);
+                            float c[3] = {0.5f * (x + x1), 0.5f * D, zr}, uu[3] = {1, 0, 0}, vv[3] = {0, 1, 0};
+                            add("Ridge cap shingle " + std::to_string(++r), "shingle", ly.material, stories - 1, c, uu, vv,
+                                0.5f * (x1 - x), 6 * IN, 0.5f * t);
+                        }
+                    }
                 } else {
                     int k = 0;
                     for (float sl = 0; sl < slopeLen - 0.01f; sl += SHEET_W)
@@ -677,7 +705,7 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
         float outer = 0;
         for (size_t l = 0; l < ew.layers.size(); ++l)
             if (std::string(lib.materials[ew.layers[l].material].id) == "pvc_vinyl") outer = layerOffset(lib, ew, (int)l, false) + 0.5f * ew.layers[l].thickness;
-        const float pieceL = 12 * FT;
+        const float pieceL = 12.5f * FT;   // vinyl siding panels are sold 12 ft 6 in long
         // wall courses, story by story, from the slab to the eaves
         for (int side = 0; side < 4; ++side) {
             bool alongX = side % 2 == 0;
@@ -741,14 +769,21 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
         float yIn = side == 0 ? 0.0f : D, yOut = side == 0 ? -oh : D + oh;
         float zEdge = RB + chord - pitch * oh;
         float a = std::min(yIn, yOut), b = std::max(yIn, yOut);
-        addBoxXYZ(side == 0 ? "Vented vinyl soffit (south eave)" : "Vented vinyl soffit (north eave)", "soffit", vinyl, stories - 1, 0, a,
-                  RB - 0.03f, width, b, RB - 0.03f + 0.0011f);
+        std::string sname = side == 0 ? " (south eave)" : " (north eave)";
+        int k = 0;
+        for (float x = 0; x < width - 0.01f; x += 1.0f * FT)   // vented vinyl soffit panels, 12 in wide
+            addBoxXYZ("Vented vinyl soffit panel " + std::to_string(++k) + sname, "soffit", vinyl, stories - 1, x, a, RB - 0.03f,
+                      std::min(width, x + 1.0f * FT), b, RB - 0.03f + 0.0011f);
         float fy = side == 0 ? yOut - 0.5f * fasc.first : yOut + 0.5f * fasc.first;
-        addBoxXYZ(side == 0 ? "Fascia board (south eave)" : "Fascia board (north eave)", "fascia", mat("lumber_spf"), stories - 1, 0,
-                  fy - 0.5f * fasc.first, zEdge - fasc.second, width, fy + 0.5f * fasc.first, zEdge);
+        k = 0;
+        for (float x = 0; x < width - 0.01f; x += 16 * FT)     // fascia boards, 16 ft lengths
+            addBoxXYZ("Fascia board " + std::to_string(++k) + sname, "fascia", mat("lumber_spf"), stories - 1, x, fy - 0.5f * fasc.first,
+                      zEdge - fasc.second, std::min(width, x + 16 * FT), fy + 0.5f * fasc.first, zEdge);
         float gy = side == 0 ? yOut - fasc.first - 0.5f * gut.first : yOut + fasc.first + 0.5f * gut.first;
-        addBoxXYZ(side == 0 ? "5 in K-style gutter (south)" : "5 in K-style gutter (north)", "gutter", mat("aluminum"), stories - 1, 0,
-                  gy - 0.5f * gut.first, zEdge - 0.08f - gut.second, width, gy + 0.5f * gut.first, zEdge - 0.08f);
+        k = 0;
+        for (float x = 0; x < width - 0.01f; x += 10 * FT)     // gutter sections, 10 ft lengths
+            addBoxXYZ("5 in K-style gutter section " + std::to_string(++k) + sname, "gutter", mat("aluminum"), stories - 1, x,
+                      gy - 0.5f * gut.first, zEdge - 0.08f - gut.second, std::min(width, x + 10 * FT), gy + 0.5f * gut.first, zEdge - 0.08f);
         for (float x : {0.15f, width - 0.15f}) {
             addBoxXYZ("Downspout, 2 x 3 in", "downspout", mat("aluminum"), 0, x - 0.5f * dsp.second, gy - 0.5f * dsp.first, 0.0f,
                       x + 0.5f * dsp.second, gy + 0.5f * dsp.first, zEdge - 0.08f - gut.second);
@@ -802,9 +837,18 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
             }
             pieces.swap(next);
         }
-        for (const Rc& p : pieces)
-            if (p.x1 - p.x0 > 0.02f && p.y1 - p.y0 > 0.02f)
-                addBoxXYZ(r.name + " floor: " + m.name, "floor covering", r.floorMaterial, r.story, p.x0, p.y0, zb, p.x1, p.y1, zb + t);
+        bool tile = std::string(m.id) == "pvc_vinyl";
+        float stepX = tile ? 1.0f * FT : 1e9f, stepY = tile ? 1.0f * FT : 12.0f * FT;   // 12 in tiles, or 12 ft carpet widths
+        int k = 0;
+        for (const Rc& p : pieces) {
+            if (p.x1 - p.x0 <= 0.02f || p.y1 - p.y0 <= 0.02f) continue;
+            for (float y = p.y0; y < p.y1 - 0.005f; y += stepY)
+                for (float x = p.x0; x < p.x1 - 0.005f; x += stepX) {
+                    float x1 = std::min(p.x1, x + stepX), y1 = std::min(p.y1, y + stepY);
+                    addBoxXYZ(r.name + (tile ? " vinyl floor tile " : " carpet, 12 ft width ") + std::to_string(++k), "floor covering",
+                              r.floorMaterial, r.story, x, y, zb, x1, y1, zb + t);
+                }
+        }
     }
     for (size_t it = 0; it < items.size(); ++it)
         for (const Part& p : items[it].parts) {

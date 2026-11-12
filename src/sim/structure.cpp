@@ -13,7 +13,7 @@ bool isFraming(const std::string& k) {
            k == "slab" || k == "gusset plate";
 }
 bool isSheet(const std::string& k) {
-    return k.find("sheet") != std::string::npos || k == "roof deck panel" || k == "roofing" || k == "siding course" ||
+    return k.find("sheet") != std::string::npos || k == "roof deck panel" || k == "shingle" || k == "siding course" ||
            k == "subfloor panel" || k == "soffit" || k == "insulation" || k == "insulation batt";
 }
 // Strength (see docs/DATA_REGISTER.md):
@@ -113,7 +113,7 @@ bool Structure::build(const Scene& sc, const MaterialLibrary& lib, const Solver&
                 ok = (B.framing || B.ground) && overlapXY(A, B, 0.03f) && B.zmin < A.zmin - 0.005f && B.zmax > A.zmin - 0.03f;
             } else if (sheet) {
                 // sheets, siding, decking and insulation are fastened to the framing they touch
-                ok = (B.framing || B.ground || (kind == "roofing" && sc.objects[B.object].kind == "roof deck panel")) &&
+                ok = (B.framing || B.ground || (kind == "shingle" && sc.objects[B.object].kind == "roof deck panel")) &&
                      overlapXY(A, B, 0.12f) && B.zmax > A.zmin - 0.12f && B.zmin < A.zmax + 0.12f;
             } else {
                 // everything else rests on what is directly below it, or hangs on adjacent framing
@@ -296,7 +296,7 @@ void Structure::update(Solver& sim, float dt) {
         p.vz = 0;
         const SceneObject& o = scene_->objects[p.object];
         // the hole it leaves
-        bool panel = o.kind == "subfloor panel" || o.kind == "roof deck panel" || o.kind == "roofing";
+        bool panel = o.kind == "subfloor panel" || o.kind == "roof deck panel";
         for (size_t q = 0; q < p.barriers.size(); ++q) {
             if (panel) sim.failBarrier(p.barriers[q]);
             else sim.removeLayer(p.barriers[q], p.layers[q]);

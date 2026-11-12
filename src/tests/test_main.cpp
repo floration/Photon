@@ -218,7 +218,15 @@ TEST(build_stages_complete) {
     for (int s = STAGE_FLOORPLAN; s <= STAGE_COUNT; ++s)
         if (s != STAGE_MEP_LAYOUT) CHECK_MSG(perStage[s] > 0, std::string("no objects in stage ") + stageName(s));
     CHECK(cables > 50 && water > 10 && drains > 5 && receptacles > 30);
-    CHECK(batts > 50 && siding > 50 && gutters == 2 && trash >= 4);
+    CHECK(batts > 50 && siding > 50 && gutters >= 2 && trash >= 4);
+    int shingles = 0, soffits = 0, tiles = 0;
+    for (const SceneObject& o : w.scene.objects) {
+        shingles += o.kind == "shingle";
+        soffits += o.kind == "soffit";
+        tiles += o.name.find("vinyl floor tile") != std::string::npos;
+    }
+    CHECK_MSG(shingles > 500, std::to_string(shingles) + " shingles");   // every shingle is its own object
+    CHECK(soffits > 40 && tiles > 100);
     // wiring and plumbing are installed before the walls close
     for (const SceneObject& o : w.scene.objects)
         if (o.kind == "cable" || o.kind == "water line" || o.kind == "drain") CHECK(o.stage == STAGE_ROUGH_IN);

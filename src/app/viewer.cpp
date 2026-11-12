@@ -552,7 +552,7 @@ void Viewer::buildMeshes() {
     // roof as a true slope, and edges where a neighbouring piece is gone.
     const float RB = scene_.roofBase(), Dd = scene_.depth;
     const float cosT = 1.0f / std::sqrt(1 + scene_.pitch * scene_.pitch);
-    const float chordZ = 3.5f * 0.0254f / cosT;
+    const float chordZ = (scene_.halfStory ? 7.25f : 3.5f) * 0.0254f / cosT;
     auto slopeZ = [&](float y) {   // underside of the roof deck at plan position y
         float run = y <= 0.5f * Dd ? y : Dd - y;
         return RB + chordZ + scene_.pitch * run;
@@ -849,7 +849,7 @@ void Viewer::buildConstructionMesh() {
     for (const SceneObject& o : scene_.objects) {
         if (o.stage > buildStage_) continue;
         if (o.c[2] - o.hv * std::fabs(o.v[2]) - o.hu * std::fabs(o.u[2]) - o.hn * std::fabs(o.n[2]) >= zc) continue;
-        if (roofHidden() && (o.kind == "roofing" || o.kind == "roof deck panel")) continue;
+        if (roofHidden() && (o.kind == "shingle" || o.kind == "roof deck panel")) continue;
         if (!roofHidden() && o.kind == "insulation" && buildStage_ >= STAGE_ROOFING) continue;   // attic blanket is under the roof
         const Material& m = lib_.materials[o.material];
         Vec3 col(m.color[0], m.color[1], m.color[2]);
