@@ -139,7 +139,9 @@ void Viewer::updateCamera() {
     float cp = std::cos(pitch_), sp = std::sin(pitch_);
     Vec3 fwd(std::cos(yaw_) * cp, std::sin(yaw_) * cp, sp);
     float aspect = plat_.height() > 0 ? (float)plat_.width() / plat_.height() : 1.0f;
-    vp_ = perspective(0.95f, aspect, 0.05f, 300.0f) * lookAt(eye_, eye_ + fwd, Vec3(0, 0, 1));
+    // 120 degree horizontal field of view; vertical follows the window aspect
+    float vfov = 2.0f * std::atan(std::tan(0.5f * 120.0f * 3.14159265f / 180.0f) / aspect);
+    vp_ = perspective(vfov, aspect, 0.05f, 300.0f) * lookAt(eye_, eye_ + fwd, Vec3(0, 0, 1));
 }
 
 bool Viewer::barrierVisible(const Barrier& b) const {
