@@ -142,6 +142,7 @@ struct SimStats {
     float hrr = 0;           // W, total heat release rate in the gas
     float maxGasT = 293.15f; // K
     float maxSolidT = 293.15f; // K, hottest solid or porous fuel
+    int hotCell = -1;
     float pyrolysis = 0;     // kg/s total off-gas production
     int burningCells = 0;
     int failedWindows = 0, failedCeilings = 0, failedDoors = 0, roofHoles = 0;
@@ -258,6 +259,8 @@ public:
     static constexpr int SLAB_NODES = 8;
     std::vector<float> slab;             // K, N * SLAB_NODES (used by solid fuel cells only)
     std::vector<float> slabF;            // unreacted fraction of each slab node
+    std::vector<int16_t> coverMat;       // upholstery cover over the cell's fuel (-1 none)
+    std::vector<float> coverLeft;        // m of cover still on the surface
     std::vector<int> solidCells;
     std::vector<float> itemMass0, itemPyro;   // per item: initial mass, off-gassed mass
     std::vector<uint8_t> itemFlags;
@@ -310,6 +313,7 @@ private:
     std::vector<float> radAbs_, radGas_;   // W per element, W per gas cell (last trace)
     std::vector<std::vector<float>> radBuf_;
     std::vector<uint8_t> radFlame_;
+    std::vector<float> radKap_[4], radSrc_[4];   // per band: 1/m, W/m2/sr (radiation.cpp)
     float radClock_ = 0;
     void buildRadElements();
     void traceRadiation();

@@ -373,12 +373,21 @@ float Solver::conductSlab(int c, const Material& m, float flux, float dt) {
     constexpr int n = SLAB_NODES;
     static const float dz[n] = {0.0005f, 0.0008f, 0.0012f, 0.0018f, 0.0027f, 0.0040f, 0.0060f, 0.0090f};
     float* Tn = &slab[(size_t)c * n];
-    const float rc = std::max(1.0f, m.density * m.specificHeat), k = std::max(1e-3f, m.conductivity);
+    // per-node material: the upholstery cover first, then the cell's own fuel
+    float kn[n], rcn[n], depth = 0;
+    const Material* cov = (c < (int)coverMat.size() && coverMat[c] >= 0) ? &lib->materials[coverMat[c]] : nullptr;
+    for (int i = 0; i < n; ++i) {
+        const Material& mi = (cov && depth < coverLeft[c]) ? *cov : m;
+        kn[i] = std::max(1e-3f, mi.conductivity);
+        rcn[i] = std::max(1.0f, mi.density * mi.specificHeat);
+        depth += dz[i];
+    }
+    const float k = kn[0];
     float a[n], b[n], cc[n], d[n];
     for (int i = 0; i < n; ++i) {
-        float cap = rc * dz[i] / dt;
-        float gl = i > 0 ? k / (0.5f * (dz[i - 1] + dz[i])) : 0.0f;
-        float gr = i < n - 1 ? k / (0.5f * (dz[i] + dz[i + 1])) : 0.0f;
+        float cap = rcn[i] * dz[i] / dt;
+        float gl = i > 0 ? 1.0f / (0.5f * dz[i - 1] / kn[i - 1] + 0.5f * dz[i] / kn[i]) : 0.0f;
+        float gr = i < n - 1 ? 1.0f / (0.5f * dz[i] / kn[i] + 0.5f * dz[i + 1] / kn[i + 1]) : 0.0f;
         a[i] = -gl;
         cc[i] = -gr;
         b[i] = cap + gl + gr;
@@ -407,22 +416,27 @@ float Solver::pyrolyzeSlab(int c, const Material& m, float area, float dt) {
     constexpr int n = SLAB_NODES;
     static const float dz[n] = {0.0005f, 0.0008f, 0.0012f, 0.0018f, 0.0027f, 0.0040f, 0.0060f, 0.0090f};
     const float beta = 5.0f / 60.0f, e = 2.718281828f;
-    const float rp = 2.0f * beta / std::max(10.0f, m.pyrolysisRange);
-    const float EoR = e * rp * m.pyrolysisTemp * m.pyrolysisTemp / beta;
     float* Tn = &slab[(size_t)c * n];
     float* F = &slabF[(size_t)c * n];
+    const Material* cov = (c < (int)coverMat.size() && coverMat[c] >= 0) ? &lib->materials[coverMat[c]] : nullptr;
     double dm = 0;
+    float depth = 0;
     for (int i = 0; i < n; ++i) {
-        if (F[i] <= 0 || Tn[i] < m.pyrolysisTemp - 3.0f * m.pyrolysisRange) continue;
-        float k = e * rp * std::exp(std::min(30.0f, EoR * (1.0f / m.pyrolysisTemp - 1.0f / Tn[i])));
+        const Material& mi = (cov && depth < coverLeft[c]) ? *cov : m;
+        depth += dz[i];
+        if (F[i] <= 0 || Tn[i] < mi.pyrolysisTemp - 3.0f * mi.pyrolysisRange) continue;
+        const float rp = 2.0f * beta / std::max(10.0f, mi.pyrolysisRange);
+        const float EoR = e * rp * mi.pyrolysisTemp * mi.pyrolysisTemp / beta;
+        float k = e * rp * std::exp(std::min(30.0f, EoR * (1.0f / mi.pyrolysisTemp - 1.0f / Tn[i])));
         float df = F[i] * (1.0f - std::exp(-k * dt));
         F[i] -= df;
-        dm += (double)m.density * dz[i] * df * area;
-        Tn[i] -= df * m.heatOfGasification / std::max(1.0f, m.specificHeat);
+        dm += (double)mi.density * dz[i] * df * area;
+        Tn[i] -= df * mi.heatOfGasification / std::max(1.0f, mi.specificHeat);
     }
     if (F[0] < 0.02f && fuelMass[c] > dm + 1e-4) {   // recede: shift the profile one node inward
         for (int i = 0; i < n - 1; ++i) { Tn[i] = Tn[i + 1]; F[i] = F[i + 1]; }
         F[n - 1] = 1.0f;
+        if (cov) coverLeft[c] = std::max(0.0f, coverLeft[c] - dz[0]);
     }
     return (float)dm;
 }
@@ -480,7 +494,7 @@ void Solver::solidsStep(float dt) {
         int i, j, k;
         cellIJK(c, i, j, k);
         int gas[6], ng = 0;
-        if (blocked[c]) {
+        if (blocked[c] && ng > 0) {
             for (int d = 0; d < 6; ++d) {
                 if ((d == 0 && i == 0) || (d == 1 && i == nx - 1) || (d == 2 && j == 0) || (d == 3 && j == ny - 1) ||
                     (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
@@ -516,7 +530,9 @@ void Solver::solidsStep(float dt) {
             yoAvg += Yo[g];
             if (adiabaticSurfaces) continue;
             // unburned part: convection (and flame contact); emission leaves along the rays
-            float emitU = radiationOn ? m.emissivity * SIGMA * (p4(Ts) - p4(T0)) : 0.0f;
+            // porous fuel radiates from its outer layer only (same shading cap as radiation.cpp)
+            float radFrac = blocked[c] ? 1.0f : std::min(1.0f, 4.0f * A / std::max(area, 1e-6f));
+            float emitU = radiationOn ? radFrac * m.emissivity * SIGMA * (p4(Ts) - p4(T0)) : 0.0f;
             float convU = h * (Tg - Ts);
             Qs += (1 - bf) * (convU - emitU) * perArea * dt;
             Q[g] -= (1 - bf) * convU * perArea * dt;
@@ -555,7 +571,7 @@ void Solver::solidsStep(float dt) {
         Qs -= bf * radIn;
         Pburn += bf * radIn / dt;
         float slabDm = 0;
-        if (blocked[c]) {
+        if (blocked[c] && ng > 0) {
             // thermally thick solid: everything the surface absorbs (the burning
             // part's flame included) conducts inward; Arrhenius kinetics in each
             // node decide how fast it gasifies
@@ -815,8 +831,10 @@ void Solver::gatherStats(float dt) {
     stats.fuelInDomain = fd;
     stats.maxGasT = mt;
     float ms = T0;
-    for (int c : solidCells) if (fuelMass[c] > 0 && fuelT[c] > ms) ms = fuelT[c];
+    int hc = -1;
+    for (int c : solidCells) if (fuelT[c] > ms) { ms = fuelT[c]; hc = c; }
     stats.maxSolidT = ms;
+    stats.hotCell = hc;
     stats.burningCells = nb;
     stats.failedWindows = stats.failedCeilings = stats.failedDoors = stats.roofHoles = 0;
     for (const Barrier& b : barriers) {

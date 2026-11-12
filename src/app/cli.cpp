@@ -169,6 +169,11 @@ int main(int argc, char** argv) {
                         sim.time, sim.stats.hrr / 1000, sim.stats.maxGasT - 273.15f, sim.stats.maxSolidT - 273.15f, sim.stats.burningCells,
                         sim.stats.pyrolysis, sim.maxVel, sim.stats.failedWindows, sim.stats.failedCeilings, steps,
                         wall * 1000 / steps, sim.time / wall);
+            if (sim.stats.hotCell >= 0) {
+                int hc = sim.stats.hotCell;
+                std::printf("  hottest solid: cell %d %s blocked %d porous %d fuel %.3f kg item %d\n", hc,
+                            lib.materials[sim.fuelMat[hc]].id.c_str(), sim.blocked[hc], sim.porous[hc], sim.fuelMass[hc], sim.itemOf[hc]);
+            }
             breakdown();
             std::fflush(stdout);
         }
