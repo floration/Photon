@@ -1,0 +1,12 @@
+photon_case 1
+# Dry Christmas tree in the model-home living room, small flame at the lowest
+# branches. NIST targets: dry tree peak 7.4 MW at 31 s (TN 2131, 2.1 m Douglas
+# fir, open mockup); dry Scotch pine room flashover within 40 s (NIST/USFA video).
+title "Photon: dry Christmas tree vs NIST"
+scene scenes/model_home_tree.txt
+profile realtime
+duration 90
+output out/tree_living
+ignite "Christmas tree" 2 20
+layer "LIVING" 2.4 2.4 0.0 2.44
+tree "TC_LIV" 2.4 2.4 0.3 2.3 0.4

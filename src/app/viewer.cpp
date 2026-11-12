@@ -238,6 +238,11 @@ void Viewer::lookFrom(Vec3 eye, Vec3 target) {
 
 void Viewer::igniteItem(const std::string& name, float kw, float seconds) {
     Solver& s = *sim_;
+    for (int c = 0; c < s.N; ++c)   // porous fuel of the item first (needles)
+        if (s.itemOf[c] >= 0 && scene_.items[s.itemOf[c]].name == name && !s.blocked[c] && s.fuelMass[c] > 0) {
+            s.addIgnition(c, kw * 1000.0f, seconds, SOURCES[1].name);
+            return;
+        }
     for (int c = 0; c < s.N; ++c) {
         if (s.itemOf[c] < 0 || scene_.items[s.itemOf[c]].name != name) continue;
         int up = c + s.nx * s.ny;

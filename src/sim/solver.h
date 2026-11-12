@@ -53,6 +53,16 @@ struct Barrier {
     int cellOn(int side) const { return (side == 0) == aIsInside ? cellA : cellB; }
 };
 
+// A radiating surface element (radiation.cpp).
+struct RadElem {
+    uint8_t kind = 0;      // 0 barrier side, 1 solid cell face, 2 porous fuel cell
+    int8_t side = 0;       // barrier side / solid face direction
+    bool sphere = false;   // porous fuel: rays over the full sphere
+    int idx = -1;          // barrier or cell
+    float o[3] = {0, 0, 0}, n[3] = {0, 0, 0};
+    float area = 0;        // m2
+};
+
 // One level of the pressure multigrid preconditioner (pressure_mg.cpp).
 struct PressureLevel {
     int n = 0;                       // unknowns
@@ -128,6 +138,7 @@ struct SimEvent {
 struct SimStats {
     float hrr = 0;           // W, total heat release rate in the gas
     float maxGasT = 293.15f; // K
+    float maxSolidT = 293.15f; // K, hottest solid or porous fuel
     float pyrolysis = 0;     // kg/s total off-gas production
     int burningCells = 0;
     int failedWindows = 0, failedCeilings = 0, failedDoors = 0, roofHoles = 0;
@@ -157,7 +168,8 @@ public:
     static constexpr float YCO2_AMB = 0.0006f; // ~400 ppm by volume
     static constexpr float YH2O_AMB = 0.0073f; // 50% RH at 20 C
     static constexpr float GAMMA = CP / (CP - RS);   // consistent with cp and R of the gas model
-    static constexpr float CHI_R = 0.30f;      // radiative fraction of flame heat
+    static constexpr float CHI_R = 0.35f;      // radiative fraction of flame heat (FDS default)
+    static constexpr float RAD_INTERVAL = 0.2f; // s of simulated time between radiation traces
     static constexpr float T_CRIT = 1500.0f;   // critical flame temperature, K
     static constexpr float T_AUTO = 800.0f;    // fuel gas auto-ignition, K
     static constexpr float TAU_MIX = 0.1f;     // s, mixing time at 20 cm
@@ -179,7 +191,7 @@ public:
     // from the same scene and profile; it refuses anything else with a message.
     bool saveState(const std::string& path, std::string& err) const;
     bool loadState(const std::string& path, std::string& err);
-    static constexpr uint32_t STATE_VERSION = 1;
+    static constexpr uint32_t STATE_VERSION = 2;
     bool toggleOpening(int opening);   // door: open/close, window: break; returns new "open" state
     // used by the structure model
     void addEvent(const std::string& key, const std::string& text) { logEvent(key, text); }
@@ -231,6 +243,8 @@ public:
     std::vector<int16_t> fuelMat;        // material of solid / porous fuel, -1 none
     std::vector<int16_t> itemOf;         // scene item, -1 none
     std::vector<float> fuelMass, fuelMass0, charMass, fuelT, fuelArea, radQ, condQ;
+    std::vector<float> burnFrac;         // flaming fraction of the cell's fuel surface (sub-grid spread)
+    std::vector<float> ignE;             // J/m2 a touching flame has delivered to the unburned surface
     std::vector<int> solidCells;
     std::vector<float> itemMass0, itemPyro;   // per item: initial mass, off-gassed mass
     std::vector<uint8_t> itemFlags;
@@ -278,7 +292,17 @@ private:
 
     void injectIgnitions(float dt);
     void combustion(float dt);
-    void flameRadiation();
+    // radiation (radiation.cpp)
+    std::vector<RadElem> radElems_;
+    std::vector<float> radAbs_, radGas_;   // W per element, W per gas cell (last trace)
+    std::vector<std::vector<float>> radBuf_;
+    std::vector<uint8_t> radFlame_;
+    float radClock_ = 0;
+    void buildRadElements();
+    void traceRadiation();
+    void radiationStep(float dt);
+    float elemTemp(const RadElem& e) const;
+    float elemEmissivity(const RadElem& e) const;
     void solidsStep(float dt);
     void barriersStep(float dt);
     // gas phase (gasphase.cpp)
@@ -294,9 +318,10 @@ private:
     float windAt(int axis, int side, float z) const;   // inflow velocity on a boundary face, 0 if none
     float stableDt(float dtMax) const;
     void gatherStats(float dt);
-    bool lineOfSight(int s, int t) const;
+
     void addGasSpecies(int c, float fuelGen, float aerosol, float sootPot);
     float cellSpeed(int c) const;
+    float surfaceHeating(int g, float Tg, float Ts, float h, float area) const;
     void unblockCell(int c);
 };
 

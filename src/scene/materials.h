@@ -42,6 +42,9 @@ struct Material {
     // fills its cells as fuel in open air instead of a solid block. Exposed
     // surface area per kg of fuel (m2/kg); 0 = solid.
     float porousArea = 0;
+    // Sub-grid flame spread over a surface inside one grid cell (MODELED, see
+    // docs/FLASHOVER.md): m/s sideways/downward and upward with no external heat.
+    float spreadLateral = 0.003f, spreadUp = 0.03f;
     // Non-combustible failure (fall-off, crack-out, melt); 0 = never
     float failTemp = 0;             // K
     float failTime = 0;             // s above failTemp before the layer is gone

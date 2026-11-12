@@ -79,7 +79,7 @@ bool Solver::saveState(const std::string& path, std::string& err) const {
     o.vec(hrr); o.vec(lit);
     o.vec(blocked); o.vec(porous); o.vec(fuelMat); o.vec(itemOf);
     o.vec(fuelMass); o.vec(fuelMass0); o.vec(charMass); o.vec(fuelT); o.vec(fuelArea);
-    o.vec(solidCells);
+    o.vec(solidCells); o.vec(burnFrac); o.vec(ignE);
     o.vec(itemMass0); o.vec(itemPyro); o.vec(itemFlags);
     o.pod(maxVel); o.pod(maxNu);
     uint64_t nb = barriers.size();
@@ -104,6 +104,8 @@ bool Solver::saveState(const std::string& path, std::string& err) const {
     o.pod(nk);
     for (const std::string& k : eventKeys_) o.str(k);
     o.pod(stats);
+    o.pod(radClock_);
+    o.vec(radElems_); o.vec(radAbs_); o.vec(radGas_);
     o.f.write(MAGIC, 8);   // trailer: detects truncated files
     if (!o.f) { err = "write failed: " + path; return false; }
     return true;
@@ -149,7 +151,7 @@ bool Solver::loadState(const std::string& path, std::string& err) {
     in.vec(hrr, N); in.vec(lit, N);
     in.vec(blocked, N); in.vec(porous, N); in.vec(fuelMat, N); in.vec(itemOf, N);
     in.vec(fuelMass, N); in.vec(fuelMass0, N); in.vec(charMass, N); in.vec(fuelT, N); in.vec(fuelArea, N);
-    in.vec(solidCells);
+    in.vec(solidCells); in.vec(burnFrac, N); in.vec(ignE, N);
     in.vec(itemMass0); in.vec(itemPyro); in.vec(itemFlags);
     in.pod(maxVel); in.pod(maxNu);
     uint64_t nb = 0;
@@ -183,6 +185,8 @@ bool Solver::loadState(const std::string& path, std::string& err) {
     eventKeys_.assign(nk, std::string());
     for (std::string& k : eventKeys_) in.str(k);
     in.pod(stats);
+    in.pod(radClock_);
+    in.vec(radElems_); in.vec(radAbs_); in.vec(radGas_);
     char tr[8];
     if (!in.ok || !in.f.read(tr, 8) || std::memcmp(tr, MAGIC, 8) != 0) { err = "state file is truncated or damaged"; return false; }
     zonesDirty_ = false;

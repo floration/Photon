@@ -164,9 +164,9 @@ int main(int argc, char** argv) {
         if (sim.time >= nextPrint) {
             nextPrint += 10.0f;
             double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-            std::printf("t=%6.1f s  HRR %8.1f kW  maxT %6.0f C  burning %5d  pyro %.3f kg/s  vmax %5.2f  "
+            std::printf("t=%6.1f s  HRR %8.1f kW  maxT %6.0f C  solid %5.0f C  burning %5d  pyro %.3f kg/s  vmax %5.2f  "
                         "win %d ceil %d  | %ld steps, %.1f ms/step, %.2fx realtime\n",
-                        sim.time, sim.stats.hrr / 1000, sim.stats.maxGasT - 273.15f, sim.stats.burningCells,
+                        sim.time, sim.stats.hrr / 1000, sim.stats.maxGasT - 273.15f, sim.stats.maxSolidT - 273.15f, sim.stats.burningCells,
                         sim.stats.pyrolysis, sim.maxVel, sim.stats.failedWindows, sim.stats.failedCeilings, steps,
                         wall * 1000 / steps, sim.time / wall);
             breakdown();

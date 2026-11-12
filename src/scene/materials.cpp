@@ -122,6 +122,10 @@ bool MaterialLibrary::loadMaterials(const std::string& path, std::string& err) {
             continue;
         }
         float* dst = nullptr;
+        if (k == "spread_rate") {
+            if (!num(1, cur->spreadLateral) || !num(2, cur->spreadUp)) return false;
+            continue;
+        }
         if (k == "density") dst = &cur->density;
         else if (k == "conductivity") dst = &cur->conductivity;
         else if (k == "specific_heat") dst = &cur->specificHeat;

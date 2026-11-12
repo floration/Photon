@@ -71,6 +71,7 @@ material lumber_spf
   char_yield 0.25
   surface_depth 0.003
   color 0.80 0.65 0.42
+  spread_rate 0.001 0.01      # wood with no external heat (Quintiere, Fundamentals of Fire Phenomena, ch. 8; verify)
   source "density/k: USDA FPL Wood Handbook FPL-GTR-282 ch.4 (verify for SPF at 12% MC)"
   source "dHc, soot yield: Tewarson, SFPE Handbook ch. 'Generation of Heat and Gaseous, Liquid and Solid Products in Fires', wood (verify)"
   source "Lg, aerosol_yield, surface_depth: PROTOTYPE estimates"
@@ -112,6 +113,7 @@ material osb
   char_yield 0.25
   surface_depth 0.003
   color 0.74 0.60 0.38
+  spread_rate 0.001 0.01
   source "density/k: APA Panel Design Specification / Wood Handbook ch.11 (verify)"
   source "dHc, soot: Tewarson, SFPE Handbook (wood products, verify)"
   offgas TAR 0.48
@@ -187,6 +189,7 @@ material pu_foam
   char_yield 0.05
   surface_depth 0.005
   color 0.85 0.80 0.45
+  spread_rate 0.005 0.05      # covered upholstery: mm/s sideways, cm/s upward (PROTOTYPE, verify vs NIST sofa burns)
   source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, flexible polyurethane foams GM21-GM27 (verify)"
   source "density: typical upholstery grade 1.8 lb/ft3 (verify against NIST TN 2303 items)"
   offgas TDI 0.25  # first stage: isocyanate, yellow smoke
@@ -214,6 +217,7 @@ material fabric
   char_yield 0.10
   surface_depth 0.002
   color 0.35 0.42 0.62
+  spread_rate 0.005 0.05
   source "PROTOTYPE blend of Tewarson cotton and polyester values (SFPE Handbook, verify)"
   offgas TAR 0.45
   offgas H2O 0.15
@@ -241,6 +245,7 @@ material nylon_carpet
   char_yield 0.10
   surface_depth 0.003
   color 0.55 0.50 0.44
+  spread_rate 0.0005 0.0005    # floor coverings need radiant heat to spread (ASTM E648 critical flux behavior)
   source "PROTOTYPE from Tewarson nylon values derated for backing and pad (SFPE Handbook, verify)"
   offgas CAPRO 0.60  # nylon 6 depolymerizes to caprolactam
   offgas CO2 0.07
@@ -268,6 +273,7 @@ material pvc_vinyl
   char_yield 0.15
   surface_depth 0.001
   color 0.90 0.90 0.86
+  spread_rate 0.0005 0.0005
   source "dHc, soot: Tewarson, SFPE Handbook, rigid PVC (verify)"
   offgas HCl 0.55  # dehydrochlorination below ~300 C; PVC is ~57% chlorine by mass
   offgas TAR 0.20
@@ -498,6 +504,7 @@ material dry_conifer
   surface_depth 0.0005
   porous_area 9.0
   color 0.20 0.38 0.18
+  spread_rate 0.02 0.12        # dry needles: tree fully involved in ~20-30 s (NIST tree videos; tuned to TN 2131 peak at 31 s, verify)
   source "PROTOTYPE: needle surface-to-volume ~5000 1/m over density 550 kg/m3 gives ~9 m2/kg; dHc and Lg from wood values, Tewarson SFPE Handbook (verify)"
   source "Targets: dry tree peak 7.4 MW at 31 s, total 938 MJ (NIST TN 2131, 2020); dry Scotch pine room flashover within 40 s (NIST/USFA dry tree video)"
   offgas TAR 0.40

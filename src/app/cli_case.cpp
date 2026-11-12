@@ -51,6 +51,8 @@ int runCase(int argc, char** argv) {
     Wind wind;
     std::vector<std::string> opens;
     std::vector<Burner> burners;
+    struct Ign { std::string item; float kw, dur; };
+    std::vector<Ign> ignites;
     std::vector<Device> devs;
     bool ok = true;
     auto num = [&](const std::string& s) { return (float)toNumber(s, ok); };
@@ -78,6 +80,8 @@ int runCase(int argc, char** argv) {
             b.peakW = num(t[7]) * 1000.0f;
             b.rampS = num(t[8]);
             burners.push_back(b);
+        } else if (k == "ignite" && t.size() > 3) {   // ignite "<item>" kW seconds: small flame on an item
+            ignites.push_back({t[1], num(t[2]), num(t[3])});
         } else if (k == "device" && t.size() > 5) {
             static const std::pair<const char*, DeviceKind> kinds[] = {
                 {"temp", DeviceKind::Temperature}, {"u", DeviceKind::VelU}, {"v", DeviceKind::VelV}, {"w", DeviceKind::VelW},
@@ -153,6 +157,20 @@ int runCase(int argc, char** argv) {
     } else {
         for (const Burner& b : burners)
             if (sim.addBurner(b) < 0) { std::fprintf(stderr, "burner '%s' covers no gas cell\n", b.label.c_str()); return 1; }
+        for (const Ign& g : ignites) {
+            int cell = -1;
+            for (int c = 0; c < sim.N && cell < 0; ++c)   // porous fuel of the item first (needles)
+                if (sim.itemOf[c] >= 0 && scene.items[sim.itemOf[c]].name == g.item && !sim.blocked[c] && sim.fuelMass[c] > 0) cell = c;
+            for (int c = 0; c < sim.N && cell < 0; ++c) {
+                if (sim.itemOf[c] < 0 || scene.items[sim.itemOf[c]].name != g.item) continue;
+                int up = c + sim.nx * sim.ny;
+                if (!sim.blocked[c]) cell = c;                       // porous item: inside it
+                else if (up < sim.N && !sim.blocked[up]) cell = up;   // solid item: on top of it
+            }
+            if (cell < 0) { std::fprintf(stderr, "no item named '%s'\n", g.item.c_str()); return 1; }
+            std::printf("ignition cell %d: blocked %d porous %d fuel %.3f kg area %.3f m2 mat %d\n", cell, sim.blocked[cell], sim.porous[cell], sim.fuelMass[cell], sim.fuelArea[cell], sim.fuelMat[cell]);
+            sim.addIgnition(cell, g.kw * 1000.0f, g.dur, "Small flame on " + g.item);
+        }
     }
     std::printf("case %s: %s profile, grid %d x %d x %d = %d cells at %.0f cm, %zu devices\n", casePath.c_str(),
                 sim.profile.name.c_str(), sim.nx, sim.ny, sim.nz, sim.N, sim.dx * 100, devs.size());
@@ -219,6 +237,9 @@ int runCase(int argc, char** argv) {
             std::fflush(stdout);
         }
     }
+    for (const SimEvent& e : sim.events) std::printf("  [%6.1f s] %s\n", e.time, e.text.c_str());
+    std::ofstream ev(prefix + "_events.txt");
+    for (const SimEvent& e : sim.events) ev << e.time << "\t" << e.text << "\n";
     std::printf("done: %ld steps, %.1f s wall\n", steps, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     return 0;
 }

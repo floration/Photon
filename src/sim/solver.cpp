@@ -3,15 +3,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <thread>
 
 namespace photon {
 
 namespace {
-constexpr float KAPPA_SOOT = 1200.0f;   // m2/kg, prototype grey IR absorption of soot
-constexpr float KAPPA_GAS = 0.15f;      // 1/m, prototype CO2/H2O band absorption, grey
-constexpr float RAD_PATH = 0.5f;        // m, local path length for gas-to-surface exchange
 constexpr float H_CONV_MIN = 10.0f;     // W/(m2 K)
 constexpr float CHAR_K = 0.02f;         // kg/(m2 s) per unit O2 mass fraction, prototype
 constexpr float CHAR_DH = 25.0e6f;      // J/kg char oxidized
@@ -245,7 +244,7 @@ float Solver::step(float dtMax) {
     injectIgnitions(dt);
     injectBurners(dt);
     combustion(dt);        mark(1);
-    flameRadiation();      mark(2);
+    radiationStep(dt);     mark(2);
     solidsStep(dt);        mark(3);
     barriersStep(dt);      mark(4);
     turbulence();
@@ -324,8 +323,8 @@ void Solver::combustion(float dt) {
             Yc[c] += co2Made;
             Yw[c] += Y_H2O * dmf / m;
             Ya[c] *= (1.0f - frac);
-            Q[c] += q * (1.0f - chiR);
-            Qr[c] = q * chiR;
+            Q[c] += q * (1.0f - chiR);   // the radiative fraction leaves the flame at once (FDS practice);
+            Qr[c] = q * chiR;             // radiation.cpp carries it to the surfaces
             hrr[c] = q / (dt * V);
             litNew[c] = q > 1e-3f ? 1.0f : 0.0f;
         }
@@ -335,108 +334,24 @@ void Solver::combustion(float dt) {
     }, 4096);
 }
 
-// Straight-line visibility between two cell centers through the grid.
-bool Solver::lineOfSight(int s, int t) const {
-    if (s == t) return true;
-    int si, sj, sk, ti, tj, tk;
-    cellIJK(s, si, sj, sk);
-    cellIJK(t, ti, tj, tk);
-    int n = 2 * std::max({std::abs(ti - si), std::abs(tj - sj), std::abs(tk - sk)});
-    int pi = si, pj = sj, pk = sk;
-    for (int q = 1; q <= n; ++q) {
-        float f = (float)q / n;
-        int ci = (int)std::lround(si + (ti - si) * f), cj = (int)std::lround(sj + (tj - sj) * f),
-            ck = (int)std::lround(sk + (tk - sk) * f);
-        // step one axis at a time so every crossed face is checked
-        while (pi != ci || pj != cj || pk != ck) {
-            int cur = cell(pi, pj, pk), d, ni = pi, nj = pj, nk = pk;
-            if (pi != ci) { d = ci > pi ? 1 : 0; ni += ci > pi ? 1 : -1; }
-            else if (pj != cj) { d = cj > pj ? 3 : 2; nj += cj > pj ? 1 : -1; }
-            else { d = ck > pk ? 5 : 4; nk += ck > pk ? 1 : -1; }
-            if (barrierIntact(barrierOn(cur, d))) return false;
-            pi = ni; pj = nj; pk = nk;
-            int nc = cell(pi, pj, pk);
-            if (nc == t) return true;
-            if (blocked[nc]) return false;
-        }
-    }
-    return true;
-}
-
-// PROTOTYPE near-field flame radiation: the radiant fraction of each burning
-// cell is shared among visible solid surfaces within two cells by solid
-// angle; the rest leaves the near field and is not tracked (no radiation
-// transport until Phase 4).
-void Solver::flameRadiation() {
-    burnList_.clear();
-    for (int c = 0; c < N; ++c)
-        if (Qr[c] > 0) burnList_.push_back(c);
-    const int R = 1;   // 3x3x3 near field: R = 2 cost ~60% of the step in big fires
-    const float A = dx * dx;
-    struct Target { int kind; int idx; int side; float w; };
-    std::mutex mtx;
-    // deposits are applied in burn-list order so results do not depend on thread timing
-    std::vector<std::pair<int, std::vector<Target>>> chunks;
-    pool_->parallelFor((int)burnList_.size(), [&](int lb, int le) {
-    std::vector<Target> targets, local;
-    for (int li = lb; li < le; ++li) {
-        int s = burnList_[li];
-        int si, sj, sk;
-        cellIJK(s, si, sj, sk);
-        targets.clear();
-        float wsum = 0;
-        for (int dk = -R; dk <= R + 1; ++dk)
-            for (int dj = -R; dj <= R + 1; ++dj)
-                for (int di = -R; di <= R + 1; ++di) {
-                    int i = si + di, j = sj + dj, k = sk + dk;
-                    if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) continue;
-                    int t = cell(i, j, k);
-                    bool inCube = di <= R && dj <= R && dk <= R;
-                    if (inCube && fuelMat[t] >= 0) {
-                        float r = std::max(0.5f, std::sqrt(float(di * di + dj * dj + dk * dk))) * dx;
-                        if (lineOfSight(s, t)) {
-                            float wt = A / (4.0f * 3.14159265f * r * r);
-                            if (t == s) wt = 0.25f;
-                            targets.push_back({0, t, 0, wt});
-                            wsum += wt;
-                        }
-                    }
-                    // lower faces of cell t: x at i, y at j, z at k
-                    for (int ax = 0; ax < 3; ++ax) {
-                        int b = ax == 0 ? bx[xface(i, j, k)] : ax == 1 ? by[yface(i, j, k)] : bz[zface(i, j, k)];
-                        if (!barrierIntact(b)) continue;
-                        float fc[3] = {(float)i + 0.5f, (float)j + 0.5f, (float)k + 0.5f};
-                        fc[ax] -= 0.5f;
-                        float sc[3] = {(float)si + 0.5f, (float)sj + 0.5f, (float)sk + 0.5f};
-                        float d[3] = {fc[0] - sc[0], fc[1] - sc[1], fc[2] - sc[2]};
-                        float r2 = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) * dx * dx;
-                        if (r2 < 1e-6f) continue;
-                        float r = std::sqrt(r2);
-                        float cosT = std::fabs(d[ax]) * dx / r;
-                        const Barrier& br = barriers[b];
-                        // the near cell is on the source's side of the face
-                        int nearCell = d[ax] > 0 ? br.cellA : br.cellB;
-                        if (nearCell < 0 || !lineOfSight(s, nearCell)) continue;
-                        int side = (nearCell == br.cellOn(0)) ? 0 : 1;
-                        float wt = A * cosT / (4.0f * 3.14159265f * r2);
-                        targets.push_back({1, b, side, wt});
-                        wsum += wt;
-                    }
-                }
-        if (targets.empty()) continue;
-        float scale = wsum > 0.9f ? 0.9f / wsum : 1.0f;
-        float P = Qr[s];
-        for (const Target& tg : targets) local.push_back({tg.kind, tg.idx, tg.side, P * tg.w * scale});
-    }
-    std::lock_guard<std::mutex> lk(mtx);
-    chunks.emplace_back(lb, std::move(local));
-    }, 16);
-    std::sort(chunks.begin(), chunks.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-    for (const auto& ch : chunks)
-    for (const Target& tg : ch.second) {
-        if (tg.kind == 0) radQ[tg.idx] += tg.w;
-        else barriers[tg.idx].radIn[tg.side] += tg.w;
-    }
+// Gas-to-surface heating. Where the adjacent cell is flaming, a 20 cm cell's
+// mean temperature is far below the flame's, so the flame-covered part of the
+// surface gets the flux of a turbulent flame instead (sub-grid flame heat
+// feedback, MODELED: flame 1200 K, emissivity 0.3, h 15 W/m2K, about
+// 30-50 kW/m2 to a fuel at its pyrolysis temperature; typical measured
+// burning-surface fluxes of furniture, SFPE Handbook ch. on flame spread,
+// verify). Flame coverage grows with the cell's heat release rate and is full
+// at 1.2 MW/m3. The gas cell pays for the energy.
+float Solver::surfaceHeating(int g, float Tg, float Ts, float h, float area) const {
+    constexpr float T_FLAME = 1200.0f, EPS_FLAME = 0.3f, H_FLAME = 15.0f, HRRPUV_FULL = 1.2e6f;
+    constexpr float FEEDBACK_MAX = 0.3f;   // a flame gives at most this share of its heat back to the fuel beside it
+    float conv = h * (Tg - Ts);
+    float phi = pilot[g] ? 1.0f : std::min(1.0f, hrr[g] / HRRPUV_FULL);
+    if (phi <= 0 || Ts >= T_FLAME) return conv;
+    float flame = H_FLAME * (T_FLAME - Ts) + EPS_FLAME * SIGMA * (p4(T_FLAME) - p4(Ts));
+    float cap = FEEDBACK_MAX * hrr[g] * dx * dx * dx / std::max(area, 1e-4f);   // W/m2 the flame can afford
+    flame = std::min(flame, std::max(conv, cap));
+    return (1 - phi) * conv + phi * std::max(conv, flame);
 }
 
 void Solver::unblockCell(int c) {
@@ -511,20 +426,61 @@ void Solver::solidsStep(float dt) {
         float Qs = radQ[c] + condQ[c];
         float Ts = fuelT[c];
         float perArea = ng > 0 ? area / ng : 0;
-        float yoAvg = 0;
+        // Two parts of the surface (sub-grid flame spread, MODELED, docs/FLASHOVER.md):
+        //  - the burning part (burnFrac) sits at the pyrolysis temperature; the
+        //    flame beside it, the radiation it receives and its own emission set
+        //    how fast it gasifies (q''_net / heat of gasification);
+        //  - the unburned part heats up (lumped node Ts). It ignites when it
+        //    reaches the pyrolysis temperature, or when a flame touching it has
+        //    delivered the energy to raise a thin surface layer to that point.
+        const float Tp = m.pyrolysisTemp;
+        const float bf = m.combustible ? burnFrac[c] : 0.0f;
+        float yoAvg = 0, Pburn = 0, flameTouch = 0;
         for (int q = 0; q < ng; ++q) {
             int g = gas[q];
             float Tg = T[g];
-            float rho = gasDensity(g);
-            float epsG = 1.0f - std::exp(-(KAPPA_SOOT * rho * Ys[g] + KAPPA_GAS) * RAD_PATH);
             float h = H_CONV_MIN + 4.0f * cellSpeed(g);
-            float flux = adiabaticSurfaces ? 0.0f : h * (Tg - Ts) + m.emissivity * epsG * SIGMA * (p4(Tg) - p4(Ts));
-            float e = flux * perArea * dt;
-            Qs += e;
-            Q[g] -= e;
             yoAvg += Yo[g];
+            if (adiabaticSurfaces) continue;
+            // unburned part: convection (and flame contact); emission leaves along the rays
+            float emitU = radiationOn ? m.emissivity * SIGMA * (p4(Ts) - p4(T0)) : 0.0f;
+            float convU = h * (Tg - Ts);
+            Qs += (1 - bf) * (convU - emitU) * perArea * dt;
+            Q[g] -= (1 - bf) * convU * perArea * dt;
+            // contact flux on the touched patch (not charged to the gas: the patch is small)
+            flameTouch = std::max(flameTouch, surfaceHeating(g, Tg, Ts, h, 1e-4f) - convU);
+            // burning part: heated by its flame at the pyrolysis temperature
+            if (bf > 0) {
+                // burning area: for fuel spread through a cell (needles) only the
+                // outer layer faces the flame (they shield each other): at most
+                // half the area of the cell's six faces (PROTOTYPE, tuned to NIST dry-tree peak HRR)
+                float areaB = bf * (blocked[c] ? perArea : std::min(perArea, 3.0f * A));
+                float hb = surfaceHeating(g, Tg, Tp, h, 1e-4f);
+                float emitB = radiationOn ? m.emissivity * SIGMA * (p4(Tp) - p4(T0)) : 0.0f;
+                Pburn += areaB * (hb - emitB);
+                // the flame over a burning surface is fed by that surface: the gas
+                // cell pays for the feedback up to half of its heat release
+                float pay = std::min(areaB * hb, std::max(0.0f, areaB * h * (Tg - Tp)) + 0.5f * hrr[g] * A * dx);
+                Q[g] -= pay * dt;
+            }
         }
         if (ng > 0) yoAvg /= ng;
+        // porous fuel is also touched by flames in the cells around it (a flame
+        // below a tree's lowest branches)
+        if (!blocked[c] && !adiabaticSurfaces) {
+            for (int d = 0; d < 6; ++d) {
+                if ((d == 0 && i == 0) || (d == 1 && i == nx - 1) || (d == 2 && j == 0) || (d == 3 && j == ny - 1) ||
+                    (d == 4 && k == 0) || (d == 5 && k == nz - 1)) continue;
+                int n = c + off[d];
+                if (blocked[n] || barrierIntact(barrierOn(c, d))) continue;
+                float h = H_CONV_MIN + 4.0f * cellSpeed(n);
+                flameTouch = std::max(flameTouch, surfaceHeating(n, T[n], Ts, h, 1e-4f) - h * (T[n] - Ts));
+            }
+        }
+        // radiation and conduction split between the parts
+        float radIn = radQ[c];
+        Qs -= bf * radIn;
+        Pburn += bf * radIn / dt;
         Ts += Qs / C;
         // char surface oxidation (glowing)
         if (charMass[c] > 0 && Ts > 700.0f && ng > 0 && yoAvg > 0.01f) {
@@ -537,11 +493,34 @@ void Solver::solidsStep(float dt) {
                 Yo[g] = std::max(0.0f, Yo[g] - CHAR_O2 * dm / ng / mg);
             }
         }
-        // pyrolysis: excess heat above the pyrolysis temperature gasifies the solid
-        if (m.combustible && fuelMass[c] > 0 && Ts > m.pyrolysisTemp && ng > 0) {
-            float E = C * (Ts - m.pyrolysisTemp);
-            float dm = std::min(fuelMass[c], E / m.heatOfGasification);
-            Ts -= dm * m.heatOfGasification / C;
+        float qIn = std::max(0.0f, radIn) / std::max(area, 1e-4f) / dt;   // W/m2 radiation received this step
+        if (m.combustible && fuelMass[c] > 0 && ng > 0) {
+            // ignition of the unburned part
+            bool ignite = false;
+            if (Ts >= Tp) { Ts = Tp; ignite = true; }   // excess heat goes on into the interior (thermally thick)
+            if (flameTouch > 0) {
+                ignE[c] += flameTouch * dt;
+                float need = m.density * m.surfaceDepth * m.specificHeat * (Tp - T0);   // J/m2 to heat the surface layer
+                if (ignE[c] >= need) ignite = true;
+            }
+            if (ignite && burnFrac[c] <= 0) {
+                burnFrac[c] = std::min(0.05f, 0.01f / std::max(area, 1e-4f));   // a first burning patch of ~100 cm2
+                // Kerber's flashover indicator: the floor covering ignites
+                // (only when heat from the room did it, not a flame touching it)
+                if (porous[c] && itemOf[c] < 0 && scene && m.spreadUp < 0.01f && flameTouch <= 0) {
+                    int i3, j3, k3;
+                    cellIJK(c, i3, j3, k3);
+                    const Room* r = scene->roomAt(ox + (i3 + 0.5f) * dx, oy + (j3 + 0.5f) * dx, oz + (k3 + 0.5f) * dx);
+                    if (r) logEvent("floor-ign-" + r->name, "Flashover: floor covering ignites in " + r->name);
+                }
+            }
+        }
+        {
+            static int dbg = std::getenv("PHOTON_DEBUG_CELL") ? std::atoi(std::getenv("PHOTON_DEBUG_CELL")) : -1;
+            if (c == dbg) std::fprintf(stderr, "t=%.2f c=%d Ts=%.0f bf=%.4f ignE=%.0f touch=%.0f Pburn=%.1f hrr=%.0f pilot=%d Tg=%.0f fuel=%.4f\n", time, c, Ts, burnFrac[c], ignE[c], flameTouch, Pburn, hrr[c], pilot[c], T[c], fuelMass[c]);
+        }
+        if (m.combustible && fuelMass[c] > 0 && bf > 0 && Pburn > 0 && ng > 0) {
+            float dm = std::min(fuelMass[c], Pburn * dt / m.heatOfGasification);
             fuelMass[c] -= dm;
             if (m.charYield < 0.99f) charMass[c] += dm * m.charYield / (1.0f - m.charYield);
             float gen = dm * (1.0f - m.aerosolYield) * m.heatOfCombustion / DHC_FUEL;
@@ -561,6 +540,16 @@ void Solver::solidsStep(float dt) {
                     logEvent("item-half-" + nm, nm + " half consumed");
                 }
             }
+        }
+        if (burnFrac[c] > 0 && burnFrac[c] < 1) {
+            int i2, j2, k2;
+            cellIJK(c, i2, j2, k2);
+            bool fromBelow = k2 > 0 && (hrr[c - nx * ny] > 0 || burnFrac[c - nx * ny] >= 0.5f);
+            float v = fromBelow ? m.spreadUp : m.spreadLateral;
+            // strong radiation from a hot layer preheats the surface ahead of the
+            // flame: spread speeds up with the square of the excess over ~15 kW/m2
+            float boost = std::max(1.0f, qIn / 15000.0f);
+            burnFrac[c] = std::min(1.0f, burnFrac[c] + dt * v * boost * boost / dx);
         }
         fuelT[c] = std::clamp(Ts, T_MIN, T_MAX);
         if (blocked[c] && fuelMass[c] <= 1e-6f && m.combustible) toUnblock.push_back(c);
@@ -604,10 +593,12 @@ void Solver::barriersStep(float dt) {
             if (g[s] < 0) continue;
             float Tg = T[g[s]], Tn = b.T[s];
             float rho = gasDensity(g[s]);
-            float epsG = 1.0f - std::exp(-(KAPPA_SOOT * rho * Ys[g[s]] + KAPPA_GAS) * RAD_PATH);
+            (void)rho;
             float h = H_CONV_MIN + 4.0f * cellSpeed(g[s]);
-            flux[s] = adiabaticSurfaces ? 0.0f : h * (Tg - Tn) + m.emissivity * epsG * SIGMA * (p4(Tg) - p4(Tn));
-            Q[g[s]] -= flux[s] * A * dt;
+            float emit = radiationOn ? m.emissivity * SIGMA * (p4(Tn) - p4(T0)) : 0.0f;
+            float conv = adiabaticSurfaces ? 0.0f : surfaceHeating(g[s], Tg, Tn, h, A);
+            flux[s] = adiabaticSurfaces ? 0.0f : conv - emit;
+            Q[g[s]] -= conv * A * dt;
         }
         float e0 = (flux[0] * A * dt + b.radIn[0]) / A, e1 = (flux[1] * A * dt + b.radIn[1]) / A;  // J/m2
         if (L[0] == L[1]) {
@@ -699,6 +690,9 @@ void Solver::gatherStats(float dt) {
     stats.fuelBurned += (double)h * dt / DHC_FUEL;
     stats.fuelInDomain = fd;
     stats.maxGasT = mt;
+    float ms = T0;
+    for (int c : solidCells) if (fuelMass[c] > 0 && fuelT[c] > ms) ms = fuelT[c];
+    stats.maxSolidT = ms;
     stats.burningCells = nb;
     stats.failedWindows = stats.failedCeilings = stats.failedDoors = stats.roofHoles = 0;
     for (const Barrier& b : barriers) {

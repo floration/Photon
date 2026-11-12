@@ -41,7 +41,7 @@ bool Solver::build(const Scene& sc, const MaterialLibrary& lb, std::string& err)
     fill(blocked, N, (uint8_t)0); fill(porous, N, (uint8_t)0);
     fill(fuelMat, N, (int16_t)-1); fill(itemOf, N, (int16_t)-1);
     fill(fuelMass, N, 0.f); fill(fuelMass0, N, 0.f); fill(charMass, N, 0.f);
-    fill(fuelT, N, T0); fill(fuelArea, N, 0.f); fill(radQ, N, 0.f); fill(condQ, N, 0.f);
+    fill(fuelT, N, T0); fill(fuelArea, N, 0.f); fill(radQ, N, 0.f); fill(condQ, N, 0.f); fill(burnFrac, N, 0.f); fill(ignE, N, 0.f);
     for (auto& t : tmp_) t.assign(N, 0.f);
     u2_.assign(NX, 0.f); v2_.assign(NY, 0.f); w2_.assign(NZ, 0.f); rhs_.assign(N, 0.f);
     barriers.clear(); ignitions.clear(); events.clear(); eventKeys_.clear(); solidCells.clear();

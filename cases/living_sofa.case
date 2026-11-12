@@ -1,0 +1,15 @@
+photon_case 1
+# Flashover comparison: small flame on the living-room sofa (modern furnishings),
+# doors and windows as in the scene. Targets (UL, Kerber 2012): modern room
+# flashover at 3:20-4:45; flames out the top of the opening ~25 s before;
+# ceiling 800-950 C after flashover. Also: Insight 10x10 ft couch room fully
+# involved at 3:15.
+title "Photon: living room sofa fire vs UL modern-room flashover"
+scene scenes/model_home.txt
+profile realtime
+duration 300
+output out/living_sofa
+ignite "Sofa" 2 60
+layer "LIVING" 2.4 2.4 0.0 2.44
+tree "TC_LIV" 2.4 2.4 0.3 2.3 0.4
+device temp "T_ceiling_sofa" 0.6 2.4 2.35
