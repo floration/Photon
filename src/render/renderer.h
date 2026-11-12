@@ -18,6 +18,7 @@ struct Vertex {
 
 struct RenderOptions {
     bool smoke = true;
+    bool fire = true;
     bool slice = false;
     float sliceZ = 1.5f;
     float clipZ = 1e9f;      // volume is hidden above this height (cutaway)

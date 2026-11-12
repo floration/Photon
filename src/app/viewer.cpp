@@ -264,6 +264,7 @@ void Viewer::handleInput(float frameDt) {
     if (in.keyPressed['C'] || in.keyPressed[KEY_F3]) { hideCeiling_ = !hideCeiling_; meshDirty_ = true; }
     if (in.keyPressed['F'] || in.keyPressed[KEY_F4]) { framing_ = !framing_; meshDirty_ = true; }
     if (in.keyPressed['X'] || in.keyPressed[KEY_F5]) ropt_.smoke = !ropt_.smoke;
+    if (in.keyPressed['V']) ropt_.fire = !ropt_.fire;
     if (in.keyPressed['T'] || in.keyPressed[KEY_F6]) ropt_.slice = !ropt_.slice;
     if (in.keyPressed['H'] || in.keyPressed[KEY_F1]) help_ = !help_;
     if (in.keyPressed[KEY_PAGEUP]) ropt_.sliceZ = std::min(ropt_.sliceZ + 0.2f, scene_.ridgeHeight());
@@ -521,7 +522,7 @@ void Viewer::drawOverlay() {
     y += lh;
     std::string tog = std::string("Source [1-3]: ") + SOURCES[source_].name + "   roof " + (hideRoof_ ? "hidden" : "shown") +
                       " [R]  ceiling " + (hideCeiling_ ? "hidden" : "shown") + " [C]  framing " + (framing_ ? "on" : "off") +
-                      " [F]  smoke " + (ropt_.smoke ? "on" : "off") + " [X]  temp slice " +
+                      " [F]  smoke " + (ropt_.smoke ? "on" : "off") + " [X]  fire " + (ropt_.fire ? "on" : "off") + " [V]  temp slice " +
                       (ropt_.slice ? fmt("%.1f m", ropt_.sliceZ) : std::string("off")) + " [T, PgUp/PgDn]";
     ren_.text(x, y, tog, 0.8f, 0.9f, 1.0f);
     // hover line
@@ -545,7 +546,7 @@ void Viewer::drawOverlay() {
             "Left-click a surface        start a fire with the selected source (solver decides if it ignites)",
             "Right-click a door/window   open or close a door, break a window",
             "WASD move  Q/E down/up  Shift fast  Ctrl slow   hold mouse + drag  look   wheel  dolly   arrows  turn",
-            "Space  pause   +/-  speed   R roof  C ceiling  F framing  X smoke  T temp slice   Backspace reset   H help",
+            "Space  pause   +/-  speed   R roof  C ceiling  F framing  X smoke  V fire  T slice   Backspace reset   H help",
             "Doors and windows start as in the scene file. Closed house fires can starve for oxygen.",
         };
         float hy = lh * 3 + 24;

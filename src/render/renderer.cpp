@@ -53,7 +53,7 @@ uniform sampler3D uVol;
 uniform mat4 uInvVP;
 uniform vec3 uEye, uBoxMin, uBoxMax;
 uniform float uStep, uClipZ, uSliceZ, uTMin, uTMax;
-uniform int uSmoke, uSlice;
+uniform int uSmoke, uSlice, uFire;
 out vec4 o;
 
 vec3 worldAt(vec2 uv, float d) {
@@ -110,16 +110,19 @@ void main() {
                 }
                 sliceDone = true;
             }
-            if (uSmoke == 0) continue;
+            if (uSmoke == 0 && uFire == 0) continue;
             vec3 p = ro + rd * t;
             vec4 v = texture(uVol, (p - uBoxMin) / (uBoxMax - uBoxMin));
             float soot = max(v.r, 0.0), aero = max(v.g, 0.0);
             float sigma = 8700.0 * soot + 3000.0 * aero;
-            float a = 1.0 - exp(-sigma * ds);
+            float a = uSmoke == 1 ? 1.0 - exp(-sigma * ds) : 0.0;
             float lightFrac = aero / (soot * 3.0 + aero + 1e-12);
             vec3 scat = mix(vec3(0.05, 0.05, 0.05), vec3(0.80, 0.78, 0.70), lightFrac);
-            vec3 emit = vec3(1.0, 0.42, 0.10) * clamp(v.a / 1.0e6, 0.0, 6.0) * 1.6;
-            emit += glowColor(v.b) * clamp(sigma * 0.5, 0.0, 1.0) * 2.0;
+            vec3 emit = vec3(0.0);
+            if (uFire == 1) {
+                emit = vec3(1.0, 0.42, 0.10) * clamp(v.a / 1.0e6, 0.0, 6.0) * 1.6;
+                emit += glowColor(v.b) * clamp(sigma * 0.5, 0.0, 1.0) * 2.0;
+            }
             col += tr * (a * scat + emit * ds);
             tr *= 1.0 - a;
             if (tr < 0.004) break;
@@ -370,6 +373,7 @@ void Renderer::render(int w, int h, const Mat4& vp, const Vec3& eye, const Rende
     glUniform1f(glGetUniformLocation(volProg_, "uTMax"), opt.sliceTMax);
     glUniform1i(glGetUniformLocation(volProg_, "uSmoke"), opt.smoke ? 1 : 0);
     glUniform1i(glGetUniformLocation(volProg_, "uSlice"), opt.slice ? 1 : 0);
+    glUniform1i(glGetUniformLocation(volProg_, "uFire"), opt.fire ? 1 : 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, colorTex_);
     glUniform1i(glGetUniformLocation(volProg_, "uColor"), 0);
