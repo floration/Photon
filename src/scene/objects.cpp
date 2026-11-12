@@ -488,17 +488,43 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
             if (std::string(m.id) == "pvc_vinyl") continue;              // siding goes on at the exterior stage
             float off = layerOffset(lib, as, (int)l, false) + 0.5f * ly.thickness;
             float pos = line + outward * off;
+            // openings in this wall: sheets are cut around them
+            struct R { float s0, s1, z0, z1; };
+            std::vector<R> holes;
+            for (const Opening& op : openings) {
+                if (op.story != w.story || (op.y0 == op.y1) != alongX) continue;
+                if (std::fabs((alongX ? op.y0 : op.x0) - line) > 0.05f) continue;
+                holes.push_back({alongX ? std::min(op.x0, op.x1) : std::min(op.y0, op.y1), alongX ? std::max(op.x0, op.x1) : std::max(op.y0, op.y1),
+                                 zb + op.sill, zb + op.head});
+            }
             int k = 0;
             for (float s = a; s < b - 0.01f; s += SHEET_W, ++k) {
                 float e = std::min(b, s + SHEET_W);
-                float c[3];
-                if (alongX) { c[0] = 0.5f * (s + e); c[1] = pos; } else { c[0] = pos; c[1] = 0.5f * (s + e); }
-                c[2] = zb + 0.5f * H;
+                std::vector<R> pieces = {{s, e, zb, zb + H}};
+                for (const R& h : holes) {
+                    std::vector<R> next;
+                    for (const R& p : pieces) {
+                        if (h.s1 <= p.s0 || h.s0 >= p.s1 || h.z1 <= p.z0 || h.z0 >= p.z1) { next.push_back(p); continue; }
+                        if (h.s0 > p.s0) next.push_back({p.s0, h.s0, p.z0, p.z1});
+                        if (h.s1 < p.s1) next.push_back({h.s1, p.s1, p.z0, p.z1});
+                        float cs0 = std::max(p.s0, h.s0), cs1 = std::min(p.s1, h.s1);
+                        if (h.z0 > p.z0) next.push_back({cs0, cs1, p.z0, h.z0});
+                        if (h.z1 < p.z1) next.push_back({cs0, cs1, h.z1, p.z1});
+                    }
+                    pieces.swap(next);
+                }
                 bool painted = l > 0 && as.layers[l - 1].thickness < 0.001f;
                 painted = painted || (l + 1 < as.layers.size() && as.layers[l + 1].thickness < 0.001f);
-                std::string nm = m.name + " sheet " + std::to_string(k + 1) + (painted ? ", painted" : "") +
-                                 (w.exterior ? " (exterior wall)" : "");
-                add(nm, std::string(m.id) + " sheet", ly.material, w.story, c, u, v, 0.5f * (e - s), 0.5f * H, 0.5f * ly.thickness);
+                for (const R& p : pieces) {
+                    if (p.s1 - p.s0 < 0.02f || p.z1 - p.z0 < 0.02f) continue;
+                    float c[3];
+                    if (alongX) { c[0] = 0.5f * (p.s0 + p.s1); c[1] = pos; } else { c[0] = pos; c[1] = 0.5f * (p.s0 + p.s1); }
+                    c[2] = 0.5f * (p.z0 + p.z1);
+                    std::string nm = m.name + " sheet " + std::to_string(k + 1) + (pieces.size() > 1 ? " (cut)" : "") +
+                                     (painted ? ", painted" : "") + (w.exterior ? " (exterior wall)" : "");
+                    add(nm, std::string(m.id) + " sheet", ly.material, w.story, c, u, v, 0.5f * (p.s1 - p.s0), 0.5f * (p.z1 - p.z0),
+                        0.5f * ly.thickness);
+                }
             }
         }
     }
@@ -587,15 +613,40 @@ void Scene::generateObjects(const MaterialLibrary& lib) {
             float pos = (side == 0 || side == 3) ? line - outer : line + outer;
             float u[3] = {alongX ? 1.f : 0.f, alongX ? 0.f : 1.f, 0}, v[3] = {0, 0, 1};
             int k = 0;
-            for (float z = 0; z < RB - 0.01f; z += course.second)
-                for (float s = 0; s < len - 0.01f; s += pieceL) {
-                    float e = std::min(len, s + pieceL), zt = std::min(RB, z + course.second);
-                    float c[3] = {alongX ? 0.5f * (s + e) : pos, alongX ? pos : 0.5f * (s + e), 0.5f * (z + zt)};
-                    if (side == 2) c[1] = depth + outer;
-                    if (side == 1) c[0] = width + outer;
-                    add("Vinyl siding course " + std::to_string(++k), "siding course", vinyl, storyAt(c[2]), c, u, v,
-                        0.5f * (e - s), 0.5f * (zt - z), 0.5f * course.first);
+            for (float z = 0; z < RB - 0.01f; z += course.second) {
+                float zt = std::min(RB, z + course.second);
+                // windows and doors in this wall at this height: siding is cut around them
+                std::vector<std::pair<float, float>> holes;
+                for (const Opening& op : openings) {
+                    if (op.kind == OpeningKind::Cased || (op.y0 == op.y1) != alongX) continue;
+                    float ol = alongX ? op.y0 : op.x0;
+                    if (std::fabs(ol - line) > 0.05f) continue;
+                    float zb0 = storyBase(op.story) + op.sill, zb1 = storyBase(op.story) + op.head;
+                    if (zt <= zb0 || z >= zb1) continue;
+                    holes.push_back({alongX ? std::min(op.x0, op.x1) : std::min(op.y0, op.y1), alongX ? std::max(op.x0, op.x1) : std::max(op.y0, op.y1)});
                 }
+                for (float s = 0; s < len - 0.01f; s += pieceL) {
+                    float e = std::min(len, s + pieceL);
+                    std::vector<std::pair<float, float>> pieces = {{s, e}};
+                    for (auto& h : holes) {
+                        std::vector<std::pair<float, float>> next;
+                        for (auto& pc : pieces) {
+                            if (h.second <= pc.first || h.first >= pc.second) { next.push_back(pc); continue; }
+                            if (h.first > pc.first) next.push_back({pc.first, h.first});
+                            if (h.second < pc.second) next.push_back({h.second, pc.second});
+                        }
+                        pieces.swap(next);
+                    }
+                    for (auto& pc : pieces) {
+                        if (pc.second - pc.first < 0.02f) continue;
+                        float c[3] = {alongX ? 0.5f * (pc.first + pc.second) : pos, alongX ? pos : 0.5f * (pc.first + pc.second), 0.5f * (z + zt)};
+                        if (side == 2) c[1] = depth + outer;
+                        if (side == 1) c[0] = width + outer;
+                        add("Vinyl siding course " + std::to_string(++k), "siding course", vinyl, storyAt(c[2]), c, u, v,
+                            0.5f * (pc.second - pc.first), 0.5f * (zt - z), 0.5f * course.first);
+                    }
+                }
+            }
         }
         // gable ends, trimmed to the roof line
         for (int end = 0; end < 2; ++end) {

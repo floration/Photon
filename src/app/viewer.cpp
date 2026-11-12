@@ -728,6 +728,7 @@ void Viewer::buildConstructionMesh() {
         if (o.stage > buildStage_) continue;
         if (o.c[2] - o.hv * std::fabs(o.v[2]) - o.hu * std::fabs(o.u[2]) - o.hn * std::fabs(o.n[2]) >= zc) continue;
         if (hideRoof_ && (o.kind == "roofing" || o.kind == "roof deck panel")) continue;
+        if (!hideRoof_ && o.kind == "insulation" && buildStage_ >= STAGE_ROOFING) continue;   // attic blanket is under the roof
         const Material& m = lib_.materials[o.material];
         Vec3 col(m.color[0], m.color[1], m.color[2]);
         if (o.kind == "water line") col = o.name.find("cold") != std::string::npos || o.name.find("main") != std::string::npos
