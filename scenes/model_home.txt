@@ -109,8 +109,10 @@ place bookshelf       "Bookshelf"            13.0  15.1
 place floor_lamp      "Floor lamp"            1.2  13.6
 place storage_bin_stack "Living room storage bins" 14.6 1.1
 item "Living room curtains"
-  part fabric 2.4      3.5 0.2 2.6   9.5 0.5 7.4
-  part fabric 2.0      0.2 5.5 2.6   0.5 10.5 7.4
+  part fabric 1.2   3.5 0.2 2.6   4.5 0.5 7.4     # open, gathered to the side
+  part fabric 1.2   8.5 0.2 2.6   9.5 0.5 7.4
+  part fabric 1   0.2 5.5 2.6   0.5 6.5 7.4     # open, gathered to the side
+  part fabric 1   0.2 9.5 2.6   0.5 10.5 7.4
 end
 
 place bed_queen       "Bedroom 1 bed"         8.0  24.27
@@ -120,8 +122,10 @@ place dresser         "Bedroom 1 dresser"     8.0  17.15 rot 180
 place closet_clothing "Bedroom 1 closet clothing" 1.4 21.5 rot 90
 place wastebasket     "Bedroom 1 wastebasket" 14.8 17.0
 item "Bedroom 1 curtains"
-  part fabric 1.8      0.2 19.5 2.6   0.5 24.5 7.4
-  part fabric 1.8      5.5 27.5 2.6   10.5 27.8 7.4
+  part fabric 0.9   0.2 19.5 2.6   0.5 20.5 7.4     # open, gathered to the side
+  part fabric 0.9   0.2 23.5 2.6   0.5 24.5 7.4
+  part fabric 0.9   5.5 27.5 2.6   6.5 27.8 7.4     # open, gathered to the side
+  part fabric 0.9   9.5 27.5 2.6   10.5 27.8 7.4
 end
 
 place dining_table_6  "Dining table"         25.5  6.5
@@ -132,7 +136,8 @@ place dining_chair    "Dining chair N2"      27.0  9.1
 place dining_chair    "Dining chair W"       21.6  6.5  rot 90
 place dining_chair    "Dining chair E"       29.4  6.5  rot 270
 item "Dining curtains"
-  part fabric 2.0      22.5 0.2 2.6   28.5 0.5 7.4
+  part fabric 1   22.5 0.2 2.6   23.5 0.5 7.4     # open, gathered to the side
+  part fabric 1   27.5 0.2 2.6   28.5 0.5 7.4
 end
 
 place base_cabinet_36 "Kitchen cabinet 1"    21.9  26.6
@@ -153,7 +158,8 @@ place dining_chair    "Kitchen chair E"      29.4  19.0  rot 270
 place kitchen_trash   "Kitchen trash can"    37.6  23.0
 place recycling_bin   "Kitchen recycling"    37.6  21.6
 item "Kitchen curtains"
-  part fabric 1.2      39.4 21.5 3.2   39.7 26.5 7.2
+  part fabric 0.6   39.4 21.5 3.2   39.7 22.5 7.2     # open, gathered to the side
+  part fabric 0.6   39.4 25.5 3.2   39.7 26.5 7.2
 end
 
 place vanity_36       "Bath 1 vanity"        33.0  1.27  rot 180
@@ -204,8 +210,10 @@ place dresser         "Bedroom 2 dresser"     8.0   4.15 rot 180
 place closet_clothing "Bedroom 2 clothing rack" 12.0 23.8
 place wastebasket     "Bedroom 2 wastebasket" 14.8  4.0
 item "Bedroom 2 curtains"
-  part fabric 1.6      0.2 7.5 2.6    0.5 12.5 7.0
-  part fabric 1.6      0.2 15.5 2.6   0.5 20.5 7.0
+  part fabric 0.8   0.2 7.5 2.6   0.5 8.5 7.0     # open, gathered to the side
+  part fabric 0.8   0.2 11.5 2.6   0.5 12.5 7.0
+  part fabric 0.8   0.2 15.5 2.6   0.5 16.5 7.0     # open, gathered to the side
+  part fabric 0.8   0.2 19.5 2.6   0.5 20.5 7.0
 end
 
 place bed_twin        "Bedroom 3 bed"        36.5   8.0  rot 270
@@ -214,14 +222,16 @@ place office_chair    "Bedroom 3 desk chair" 24.0   6.3
 place chest_of_drawers "Bedroom 3 chest"     30.0  12.85
 place wastebasket     "Bedroom 3 wastebasket" 26.5  4.0
 item "Bedroom 3 curtains"
-  part fabric 1.6      39.4 5.5 2.6   39.7 10.5 7.0
+  part fabric 0.8   39.4 5.5 2.6   39.7 6.5 7.0     # open, gathered to the side
+  part fabric 0.8   39.4 9.5 2.6   39.7 10.5 7.0
 end
 
 place bed_twin        "Bedroom 4 bed"        36.5  19.5  rot 270
 place dresser         "Bedroom 4 dresser"    31.0  24.15
 place nightstand      "Bedroom 4 nightstand" 38.6  22.9  rot 270
 item "Bedroom 4 curtains"
-  part fabric 1.6      39.4 17.5 2.6  39.7 22.5 7.0
+  part fabric 0.8   39.4 17.5 2.6   39.7 18.5 7.0     # open, gathered to the side
+  part fabric 0.8   39.4 21.5 2.6   39.7 22.5 7.0
 end
 
 place bathtub_60      "Bath 2 tub"           24.35 22.5  rot 270

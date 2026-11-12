@@ -192,7 +192,7 @@ asset tv_55
   name "55 in LCD television"
   size 49 3 29
   part abs_plastic 7   -24.5 -1.5 0    24.5 1.5 29
-  part glass 4         -24 -1.5 1      24 -1 28
+  part glass 4         -24 -1.7 1      24 -1.5 28     # screen face, proud of the bezel
   source "Typical 55 in set dimensions; masses PROTOTYPE"
 end
 
@@ -262,7 +262,7 @@ asset microwave_otr
   name "Over-the-range microwave"
   size 30 15 17
   part steel 15        -15 -7.5 0   15 7.5 17
-  part abs_plastic 3   -14 -7.5 1   14 -6 16
+  part abs_plastic 3   -14 -7.7 1   14 -7.5 16     # door and control panel
   source "Typical; masses PROTOTYPE"
 end
 

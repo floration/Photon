@@ -68,6 +68,11 @@ private:
     // toggles
     std::atomic<bool> running_{true};
     bool hideRoof_ = true, hideCeiling_ = true, framing_ = false, help_ = false, upperCut_ = false;
+    bool autoCut_ = true;          // show roof and ceilings automatically while the camera is inside the house
+    bool camInside() const { return eye_.x > -0.3f && eye_.x < scene_.width + 0.3f && eye_.y > -0.3f && eye_.y < scene_.depth + 0.3f && eye_.z < scene_.ridgeHeight(); }
+    bool roofHidden() const { return hideRoof_ && !(autoCut_ && camInside()); }
+    bool ceilingHidden() const { return hideCeiling_ && !(autoCut_ && camInside()); }
+    bool lastInside_ = false;
     float cutZ() const { return upperCut_ && sim_->kCeilS.size() > 1 ? sim_->oz + sim_->kCeilS[0] * sim_->dx : 1e9f; }
     RenderOptions ropt_;
     int source_ = 1;
@@ -191,8 +196,8 @@ void Viewer::updateCamera() {
 bool Viewer::barrierVisible(const Barrier& b) const {
     if (b.failed || b.userOpen) return false;
     switch (b.kind) {
-    case BarrierKind::Roof: case BarrierKind::Fascia: case BarrierKind::Gable: case BarrierKind::Soffit: return !hideRoof_;
-    case BarrierKind::Ceiling: return !hideCeiling_ && !framing_;
+    case BarrierKind::Roof: case BarrierKind::Fascia: case BarrierKind::Gable: case BarrierKind::Soffit: return !roofHidden();
+    case BarrierKind::Ceiling: return !ceilingHidden() && !framing_;
     case BarrierKind::Wall: return !framing_;
     default: return true;
     }
@@ -602,12 +607,34 @@ void Viewer::buildMeshes() {
         else if (ax == 1) { n = Vec3(0, 1, 0); u = Vec3(0, 0, 1); w = Vec3(1, 0, 0); }
         else { n = Vec3(0, 0, 1); u = Vec3(1, 0, 0); w = Vec3(0, 1, 0); }
         Vec3 p0(x, y, z);
-        if (b.kind == BarrierKind::Gable) {   // trim the gable to the roof line
-            float top = slopeZ(y + 0.5f * dx) - z;
-            if (top <= 0) continue;
-            hW = std::min(dx, top);   // w is +z for x-faces
+        // vertical faces under the roof are trimmed exactly to the roof line
+        float h0 = dx, h1 = dx;   // x-faces: height at the u=0 and u=1 edges (w is vertical)
+        bool underRoof = ax != 2 && x > -0.01f && x < scene_.width + 0.01f && y > -0.01f && y < scene_.depth + 0.01f &&
+                         z + dx > scene_.roofBase() - 1e-3f;
+        if (underRoof) {
+            // the topmost tile of a column is stretched (or cut) to meet the roof
+            // plane exactly; the grid itself stops in 20 cm steps
+            int nb = ax == 0 ? barrierAt(0, i, j, k + 1) : barrierAt(1, i, j, k + 1);
+            bool topmost = nb < 0 || s.barriers[nb].kind == BarrierKind::Roof;
+            float hmax = topmost ? 3.0f * dx : dx;
+            if (ax == 0) {
+                h0 = std::clamp(slopeZ(y) - z, 0.0f, hmax);
+                h1 = std::clamp(slopeZ(y + dx) - z, 0.0f, hmax);
+                if ((y < 0.5f * Dd) != (y + dx < 0.5f * Dd)) h0 = h1 = std::clamp(slopeZ(0.5f * Dd) - z, 0.0f, hmax);
+                if (h0 <= 0 && h1 <= 0) continue;
+            } else {
+                hU = std::clamp(slopeZ(y) - z, 0.0f, hmax);   // y-faces: u is vertical
+                if (hU <= 0) continue;
+            }
         }
         Vec3 U = u * hU, W = w * hW;
+        if (ax == 0 && (h0 != dx || h1 != dx)) {
+            Vec3 W0 = w * h0, W1 = w * h1;
+            Vec3 qa = p0 + n * sA, qb = p0 + n * sB;
+            addQuad(op, qb, qb + U, qb + U + W1, qb + W0, n, colSide[1], emiSide[1]);
+            addQuad(op, qa, qa + W0, qa + U + W1, qa + U, n * -1, colSide[0], emiSide[0]);
+            continue;
+        }
         if (b.kind == BarrierKind::Window) {
             float mid = 0.5f * (sA + sB);
             Vec3 q = p0 + n * mid;
@@ -642,10 +669,31 @@ void Viewer::buildMeshes() {
             }
         }
     }
-    // solid cells (contents)
+    // contents: an item is drawn at its true shape until any of its cells starts
+    // to heat, off-gas or burn away; from then on its 20 cm cells show the damage
+    std::vector<uint8_t> intact(scene_.items.size(), 1);
+    for (int c : s.solidCells) {
+        int it = s.itemOf[c];
+        if (it < 0) continue;
+        const Material& m = lib_.materials[s.fuelMat[c]];
+        bool ok = s.blocked[c] && s.fuelT[c] < 420.0f;
+        if (m.combustible && s.fuelMass0[c] > 0) ok = ok && s.fuelMass[c] >= 0.98f * s.fuelMass0[c] * (1 - m.charYield);
+        if (!ok) intact[it] = 0;
+    }
+    for (size_t it = 0; it < scene_.items.size(); ++it) {
+        if (!intact[it] || (scene_.items[it].story > 0 && upperCut_)) continue;
+        for (const Part& pt : scene_.items[it].parts) {
+            if (pt.box.z0 >= zc) continue;
+            const Material& m = lib_.materials[pt.material];
+            Vec3 c(0.5f * (pt.box.x0 + pt.box.x1), 0.5f * (pt.box.y0 + pt.box.y1), 0.5f * (pt.box.z0 + pt.box.z1));
+            addBox(op, c, Vec3(0.5f * (pt.box.x1 - pt.box.x0), 0, 0), Vec3(0, 0.5f * (pt.box.y1 - pt.box.y0), 0),
+                   Vec3(0, 0, 0.5f * (pt.box.z1 - pt.box.z0)), Vec3(m.color[0], m.color[1], m.color[2]), Vec3());
+        }
+    }
     const int off[6] = {-1, 1, -s.nx, s.nx, -s.nx * s.ny, s.nx * s.ny};
     for (int c : s.solidCells) {
         if (!s.blocked[c]) continue;
+        if (s.itemOf[c] >= 0 && intact[s.itemOf[c]]) continue;
         int i, j, k;
         s.cellIJK(c, i, j, k);
         const Material& m = lib_.materials[s.fuelMat[c]];
@@ -671,7 +719,7 @@ void Viewer::buildMeshes() {
     }
     // framing members at their exact size; trusses take their state from the
     // attic cell they pass through
-    bool showTruss = hideRoof_ || framing_;
+    bool showTruss = roofHidden() || framing_;
     for (const Member& mb : scene_.members) {
         bool truss = mb.kind == MemberKind::TrussChord || mb.kind == MemberKind::TrussWeb || mb.kind == MemberKind::Gusset ||
                      mb.kind == MemberKind::Rafter || mb.kind == MemberKind::RidgeBoard || mb.kind == MemberKind::CollarTie;
@@ -732,8 +780,8 @@ void Viewer::buildConstructionMesh() {
     for (const SceneObject& o : scene_.objects) {
         if (o.stage > buildStage_) continue;
         if (o.c[2] - o.hv * std::fabs(o.v[2]) - o.hu * std::fabs(o.u[2]) - o.hn * std::fabs(o.n[2]) >= zc) continue;
-        if (hideRoof_ && (o.kind == "roofing" || o.kind == "roof deck panel")) continue;
-        if (!hideRoof_ && o.kind == "insulation" && buildStage_ >= STAGE_ROOFING) continue;   // attic blanket is under the roof
+        if (roofHidden() && (o.kind == "roofing" || o.kind == "roof deck panel")) continue;
+        if (!roofHidden() && o.kind == "insulation" && buildStage_ >= STAGE_ROOFING) continue;   // attic blanket is under the roof
         const Material& m = lib_.materials[o.material];
         Vec3 col(m.color[0], m.color[1], m.color[2]);
         if (o.kind == "water line") col = o.name.find("cold") != std::string::npos || o.name.find("main") != std::string::npos
@@ -902,6 +950,7 @@ void Viewer::drawPanels() {
             for (int st = STAGE_FLOORPLAN; st <= STAGE_COUNT; ++st)
                 if (ui_.button(stageName(st), buildStage_ == st, 6)) { buildStage_ = st; meshDirty_ = true; }
         ui_.heading("View");
+        if (ui_.checkbox("Auto: show roof and ceilings when inside", autoCut_)) meshDirty_ = true;
         if (ui_.checkbox("Hide roof  [R]", hideRoof_)) meshDirty_ = true;
         if (ui_.checkbox("Hide ceilings  [Z]", hideCeiling_)) meshDirty_ = true;
         if (ui_.checkbox("Hide upper story  [U]", upperCut_)) meshDirty_ = true;
@@ -1083,7 +1132,8 @@ void Viewer::run() {    double last = plat_.now();
             if (meshDirty_) buildMeshes();
             uploadVolume();
             ropt_.time = (float)now;
-            ropt_.clipZ = std::min(hideCeiling_ ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f, cutZ());
+            ropt_.clipZ = std::min(ceilingHidden() ? sim_->oz + sim_->kCeil * sim_->dx : 1e9f, cutZ());
+            if (camInside() != lastInside_) { lastInside_ = camInside(); meshDirty_ = true; }
             if (now - lastHover > 0.1) {
                 hover_ = ui_.mouseOverUi() ? std::string() : describe(pick(in_.mouseX, in_.mouseY));
                 lastHover = now;
@@ -1098,15 +1148,20 @@ void Viewer::run() {    double last = plat_.now();
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
         if (!still_.empty()) {
             ++stillFrame_;
-            struct View { Vec3 eye, at; bool roofHidden; int stage; bool cut; } views[6] = {
+            struct View { Vec3 eye, at; bool roofHidden; int stage; bool cut; } views[10] = {
                 {Vec3(-9, -12, 11), Vec3(7, 5, 3), false, 0, false},
                 {Vec3(-6, -9, 12), Vec3(7, 4.5f, 2), true, STAGE_FRAMING, false},
                 {Vec3(-4, -7, 9), Vec3(7, 4.5f, 2), true, STAGE_ROUGH_IN, true},
                 {Vec3(1.0f, 1.0f, 1.7f), Vec3(5, 4.5f, 1.2f), true, STAGE_ROUGH_IN, true},
                 {Vec3(-9, -12, 8), Vec3(7, 5, 3), false, STAGE_EXTERIOR, false},
-                {Vec3(5.5f, 5.6f, 4.4f), Vec3(5.5f, 1.8f, 1.2f), true, 0, false}};   // down the stairwell from upstairs
+                {Vec3(5.5f, 5.6f, 4.4f), Vec3(5.5f, 1.8f, 1.2f), true, 0, false},   // down the stairwell from upstairs
+                // interiors at eye height, roof and ceilings in place (what a firefighter sees)
+                {Vec3(4.3f, 0.6f, 1.6f), Vec3(0.5f, 3.5f, 1.0f), false, 0, false},     // living room
+                {Vec3(7.0f, 4.6f, 1.6f), Vec3(11.0f, 8.0f, 1.0f), false, 0, false},   // kitchen
+                {Vec3(4.5f, 4.0f, 4.3f), Vec3(0.3f, 2.5f, 3.6f), false, 0, false},    // upstairs bedroom 2 (knee walls, sloped ceiling)
+                {Vec3(6.5f, 1.5f, 4.3f), Vec3(11.5f, 2.5f, 3.4f), false, 0, false}};  // upstairs bedroom 3
             int vi = stillFrame_ / 20;
-            if (vi >= 6) break;
+            if (vi >= 10) break;
             if (stillFrame_ % 20 == 1) { lookFrom(views[vi].eye, views[vi].at); hideRoof_ = views[vi].roofHidden; upperCut_ = views[vi].cut; buildStage_ = views[vi].stage; meshDirty_ = true; }
             if (stillFrame_ % 20 == 19) ren_.saveScreenshot(still_ + "_" + std::to_string(vi) + ".bmp", plat_.width(), plat_.height());
         }

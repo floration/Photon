@@ -30,7 +30,7 @@ void main() {
     vec3 L = normalize(vec3(0.35, 0.25, 0.9));
     float d = max(dot(n, L), 0.0);
     float hemi = 0.5 + 0.5 * n.z;
-    vec3 c = vC * (0.22 + 0.28 * hemi + 0.5 * d) + vE;
+    vec3 c = vC * (0.42 + 0.23 * hemi + 0.35 * d) + vE;   // generous ambient: interiors have no shadowing yet
     vec3 fl = vec3(0.0);
     for (int i = 0; i < uNumLights; ++i) {
         vec3 dl = uLights[i].xyz - vW;
