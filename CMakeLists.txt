@@ -27,7 +27,8 @@ target_link_libraries(photon_core INTERFACE Threads::Threads)
 add_library(photon_scene STATIC
   src/scene/textfile.cpp
   src/scene/materials.cpp
-  src/scene/scene.cpp)
+  src/scene/scene.cpp
+  src/scene/objects.cpp)
 target_link_libraries(photon_scene PUBLIC photon_core)
 
 # ---- sim: solver core. Must not depend on platform or render. ---------------

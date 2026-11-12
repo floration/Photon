@@ -10,6 +10,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--demo" && i + 1 < argc) demo = argv[++i];
+        else if (a == "--shot" && i + 1 < argc) demo = std::string("shot:") + argv[++i];
         else scene = a;
     }
     return runViewer(scene, demo);

@@ -70,6 +70,23 @@ struct Member {
     float width, depth;
 };
 
+// A physical piece of the house: a drywall sheet, OSB panel, stud, door slab,
+// window pane, furniture part. Oriented box: center, unit axes u v n, half sizes.
+// Phase 2 uses objects for display and identification; the per-object solid
+// model replaces the grid stand-ins in Phase 4.
+struct SceneObject {
+    int id = 0;
+    std::string name;
+    std::string kind;            // "gypsum sheet", "stud", "door slab", ...
+    int material = -1;
+    int story = 0;
+    int item = -1;               // scene item for furniture parts
+    float c[3];                  // center
+    float u[3], v[3], n[3];      // axes (n = thickness direction)
+    float hu, hv, hn;            // half sizes
+    bool contains(const float p[3], float tol) const;
+};
+
 struct Scene {
     std::string name;
     float width = 15.24f, depth = 9.144f;     // footprint (m)
@@ -90,6 +107,7 @@ struct Scene {
     std::vector<Item> items;
     std::vector<Stair> stairs;
     std::vector<Member> members;              // generated framing
+    std::vector<SceneObject> objects;         // every physical piece (framing, sheets, panels, parts)
 
     bool load(const std::string& path, const MaterialLibrary& lib, std::string& err);
     float storyBase(int s) const { return s * (ceilingHeight + floorDepth); }
@@ -97,9 +115,15 @@ struct Scene {
     float ridgeHeight() const { return roofBase() + pitch * depth * 0.5f; }
     int storyAt(float z) const;
     const Room* roomAt(float x, float y, float z) const;
+    // Offset of an assembly layer across its barrier plane: returns the distance
+    // (m) from the plane to the layer's inside face, measured toward the outside
+    // face. Framed assemblies are centered on the framing layer; door and window
+    // assemblies are centered; others start at the plane.
+    static float layerOffset(const MaterialLibrary& lib, const Assembly& a, int layer, bool centered);
 
 private:
     void generateFraming(const MaterialLibrary& lib);
+    void generateObjects(const MaterialLibrary& lib);
 };
 
 } // namespace photon

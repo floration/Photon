@@ -8,6 +8,7 @@
 #include "scene/scene.h"
 #include "scene/textfile.h"
 #include "sim/solver.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -134,6 +135,27 @@ TEST(scene_rejects_bad_input) {
     CHECK(!sc.load(path, w.lib, err));
     CHECK(err.find("axis-aligned") != std::string::npos);
     std::remove(path);
+}
+
+TEST(scene_objects) {
+    World& w = world();
+    int sheets = 0, studs = 0, doors = 0, parts = 0, deck = 0;
+    for (const SceneObject& o : w.scene.objects) {
+        if (o.kind == "gypsum_board sheet") ++sheets;
+        if (o.kind == "stud") ++studs;
+        if (o.kind == "door slab") ++doors;
+        if (o.kind == "furniture part") ++parts;
+        if (o.kind == "roof deck panel") ++deck;
+        CHECK_MSG(o.material >= 0 && o.hu > 0 && o.hv > 0 && o.hn > 0, o.name);
+    }
+    CHECK(sheets > 100 && studs > 300 && doors >= 10 && parts > 50 && deck > 20);
+    // gypsum sheets are standard 4 x 8 ft or cut smaller, never larger
+    for (const SceneObject& o : w.scene.objects)
+        if (o.kind == "gypsum_board sheet")
+            CHECK_MSG(2 * std::min(o.hu, o.hv) <= 4 * 0.3048f + 1e-4f && 2 * std::max(o.hu, o.hv) <= 8 * 0.3048f + 1e-4f, o.name);
+    // a 2x4 interior wall's gypsum faces sit 1-3/4 in + 1/4 in off the centerline (stud half depth + half board)
+    float off = Scene::layerOffset(w.lib, w.lib.assemblies[w.lib.findAssembly("int_wall_2x4")], 1, false) + 0.5f * 0.0127f;
+    CHECK(std::fabs(off - (-(1.75f * 0.0254f) - 0.5f * 0.0127f)) < 1e-4f);
 }
 
 // ------------------------------------------------------------ discretizer --

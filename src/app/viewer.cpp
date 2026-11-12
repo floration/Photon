@@ -84,6 +84,8 @@ private:
     std::vector<float> vol_;
     std::string hover_;
     std::string demo_;
+    std::string still_;          // --shot: render a few fixed views, save them, exit (no solving)
+    int stillFrame_ = 0;
     std::vector<float> shots_ = {20, 75, 150, 240, 330, 420};
     size_t shotIdx_ = 0;
     int shotCount_ = 0;
@@ -102,7 +104,8 @@ private:
 };
 
 bool Viewer::init(const std::string& scenePath, const std::string& demo, std::string& err) {
-    demo_ = demo;
+    if (demo.rfind("shot:", 0) == 0) { still_ = demo.substr(5); running_ = false; help_ = false; }
+    else demo_ = demo;
     std::string base = exeDir();
     if (!lib_.loadMaterials(base + "data/materials.txt", err)) return false;
     if (!lib_.loadAssemblies(base + "data/assemblies.txt", err)) return false;
@@ -430,22 +433,50 @@ void Viewer::buildMeshes() {
             }
             addQuad(op, Vec3(x0, y0, z), Vec3(x0 + dx, y0, z), Vec3(x0 + dx, y0 + dx, z), Vec3(x0, y0 + dx, z), Vec3(0, 0, 1), col, emi);
         }
-    // barriers
+    // barriers, drawn as the real pieces they stand for: each exposed layer at
+    // its true position across the assembly (walls have real thickness), the
+    // roof as a true slope, and edges where a neighbouring piece is gone.
+    const float RB = scene_.roofBase(), Dd = scene_.depth;
+    const float cosT = 1.0f / std::sqrt(1 + scene_.pitch * scene_.pitch);
+    const float chordZ = 3.5f * 0.0254f / cosT;
+    auto slopeZ = [&](float y) {   // underside of the roof deck at plan position y
+        float run = y <= 0.5f * Dd ? y : Dd - y;
+        return RB + chordZ + scene_.pitch * run;
+    };
+    auto faceIJK = [&](const Barrier& b, int& i, int& j, int& k) {
+        int f = b.face;
+        if (b.axis == 0) { i = f % (s.nx + 1); j = (f / (s.nx + 1)) % s.ny; k = f / ((s.nx + 1) * s.ny); }
+        else if (b.axis == 1) { i = f % s.nx; j = (f / s.nx) % (s.ny + 1); k = f / (s.nx * (s.ny + 1)); }
+        else { i = f % s.nx; j = (f / s.nx) % s.ny; k = f / (s.nx * s.ny); }
+    };
+    auto barrierAt = [&](int ax, int i, int j, int k) -> int {
+        if (i < 0 || j < 0 || k < 0) return -1;
+        if (ax == 0) { if (i > s.nx || j >= s.ny || k >= s.nz) return -1; return s.bx[s.xface(i, j, k)]; }
+        if (ax == 1) { if (i >= s.nx || j > s.ny || k >= s.nz) return -1; return s.by[s.yface(i, j, k)]; }
+        if (i >= s.nx || j >= s.ny || k > s.nz) return -1;
+        return s.bz[s.zface(i, j, k)];
+    };
     for (const Barrier& b : s.barriers) {
         if (!barrierVisible(b)) continue;
-        int ax = b.axis, i, j, k;
-        int f = b.face;
-        if (ax == 0) { i = f % (s.nx + 1); j = (f / (s.nx + 1)) % s.ny; k = f / ((s.nx + 1) * s.ny); }
-        else if (ax == 1) { i = f % s.nx; j = (f / s.nx) % (s.ny + 1); k = f / (s.nx * (s.ny + 1)); }
-        else { i = f % s.nx; j = (f / s.nx) % s.ny; k = f / (s.nx * s.ny); }
+        int i, j, k;
+        faceIJK(b, i, j, k);
+        const int ax = b.axis;
         float x = s.ox + i * dx, y = s.oy + j * dx, z = s.oz + k * dx;
         if (z >= zc - 1e-3f) continue;
-        Vec3 p0(x, y, z), u, w, n;
-        if (ax == 0) { u = Vec3(0, dx, 0); w = Vec3(0, 0, dx); n = Vec3(1, 0, 0); }
-        else if (ax == 1) { u = Vec3(0, 0, dx); w = Vec3(dx, 0, 0); n = Vec3(0, 1, 0); }
-        else { u = Vec3(dx, 0, 0); w = Vec3(0, dx, 0); n = Vec3(0, 0, 1); }
         const Assembly& as = lib_.assemblies[b.assembly];
-        for (int side = 0; side < 2; ++side) {        // side 0: face toward cellA (normal -n)
+        bool centered = b.kind == BarrierKind::Door || b.kind == BarrierKind::Window;
+        // layer surfaces measured along +axis from the face plane
+        float sgn = b.aIsInside ? 1.0f : -1.0f;   // layer order runs toward +axis when layer 0 faces cellA
+        auto surf = [&](int asmSide) {
+            int l = asmSide == 0 ? b.front : b.back;
+            float off = Scene::layerOffset(lib_, as, l, centered);
+            if (asmSide == 1) off += as.layers[l].thickness;
+            return sgn * off;
+        };
+        float sA = surf(b.aIsInside ? 0 : 1), sB = surf(b.aIsInside ? 1 : 0);   // surface facing cellA / cellB
+        // styling per side
+        Vec3 colSide[2], emiSide[2];
+        for (int side = 0; side < 2; ++side) {
             int asmSide = (side == 0) == b.aIsInside ? 0 : 1;
             int layer = asmSide == 0 ? b.front : b.back;
             const Material& m = lib_.materials[as.layers[layer].material];
@@ -461,17 +492,72 @@ void Viewer::buildMeshes() {
                     s.cellIJK(sc, ci, cj, ck);
                     const Room* rm = scene_.roomAt(s.ox + (ci + 0.5f) * dx, s.oy + (cj + 0.5f) * dx, s.oz + (ck + 0.5f) * dx);
                     if (rm && b.kind != BarrierKind::Ceiling) col = Vec3(rm->paint[0], rm->paint[1], rm->paint[2]) * kk;
-                    else col = Vec3(0.93f, 0.93f, 0.91f) * kk;   // flat white ceilings
+                    else col = Vec3(0.93f, 0.93f, 0.91f) * kk;
                 }
             }
-            if (b.kind == BarrierKind::Ceiling && side == 0) col = col * 0.95f;
-            Vec3 e = glow(b.T[asmSide]);
-            if (b.kind == BarrierKind::Window) {
-                if (side == 0) addQuad(glass, p0, p0 + u, p0 + u + w, p0 + w, n, Vec3(0.55f, 0.72f, 0.85f), e);
-                continue;
+            colSide[side] = col;
+            emiSide[side] = glow(b.T[asmSide]);
+        }
+        // ---- roof top faces: sloped tiles following the real roof plane
+        if (b.kind == BarrierKind::Roof) {
+            if (ax != 2) continue;   // risers are hidden under the slope
+            float y0 = y, y1 = y + dx;
+            float za = slopeZ(y0), zb = slopeZ(y1);
+            if ((y0 < 0.5f * Dd) != (y1 < 0.5f * Dd)) za = zb = slopeZ(0.5f * Dd);   // ridge cell
+            float tk = 0;
+            for (const Layer& l : as.layers) tk += l.thickness;
+            Vec3 p00(x, y0, za), p10(x + dx, y0, za), p11(x + dx, y1, zb), p01(x, y1, zb);
+            Vec3 nUp = normalize(cross(p10 - p00, p01 - p00));
+            Vec3 lift = nUp * tk;
+            // outside (shingles) above, deck underside below
+            addQuad(op, p00 + lift, p10 + lift, p11 + lift, p01 + lift, nUp, colSide[1], emiSide[1]);
+            addQuad(op, p00, p01, p11, p10, nUp * -1, colSide[0], emiSide[0]);
+            continue;
+        }
+        Vec3 n, u, w;
+        float hU = dx, hW = dx;
+        if (ax == 0) { n = Vec3(1, 0, 0); u = Vec3(0, 1, 0); w = Vec3(0, 0, 1); }
+        else if (ax == 1) { n = Vec3(0, 1, 0); u = Vec3(0, 0, 1); w = Vec3(1, 0, 0); }
+        else { n = Vec3(0, 0, 1); u = Vec3(1, 0, 0); w = Vec3(0, 1, 0); }
+        Vec3 p0(x, y, z);
+        if (b.kind == BarrierKind::Gable) {   // trim the gable to the roof line
+            float top = slopeZ(y + 0.5f * dx) - z;
+            if (top <= 0) continue;
+            hW = std::min(dx, top);   // w is +z for x-faces
+        }
+        Vec3 U = u * hU, W = w * hW;
+        if (b.kind == BarrierKind::Window) {
+            float mid = 0.5f * (sA + sB);
+            Vec3 q = p0 + n * mid;
+            addQuad(glass, q, q + U, q + U + W, q + W, n, Vec3(0.55f, 0.72f, 0.85f), emiSide[0]);
+            continue;
+        }
+        Vec3 qa = p0 + n * sA, qb = p0 + n * sB;
+        addQuad(op, qb, qb + U, qb + U + W, qb + W, n, colSide[1], emiSide[1]);          // faces cellB
+        addQuad(op, qa, qa + W, qa + U + W, qa + U, n * -1, colSide[0], emiSide[0]);     // faces cellA
+        // edges where the neighbouring piece in this plane is missing (holes, openings, burn-through)
+        if (std::fabs(sB - sA) > 0.004f) {
+            Vec3 ecol = colSide[0] * 0.8f;
+            int di[4][3];
+            // neighbours along u and w in grid index space
+            int ui = ax == 0 ? 1 : (ax == 1 ? 2 : 0), wi = ax == 0 ? 2 : (ax == 1 ? 0 : 1);
+            int idx[3] = {i, j, k};
+            for (int e = 0; e < 4; ++e) {
+                for (int q = 0; q < 3; ++q) di[e][q] = idx[q];
+                if (e == 0) di[e][ui] -= 1;
+                if (e == 1) di[e][ui] += 1;
+                if (e == 2) di[e][wi] -= 1;
+                if (e == 3) di[e][wi] += 1;
+                int nb = barrierAt(ax, di[e][0], di[e][1], di[e][2]);
+                if (nb >= 0 && barrierVisible(s.barriers[nb])) continue;
+                if (b.kind == BarrierKind::Gable && e == 3) continue;
+                Vec3 o0 = p0 + (e == 1 ? U : Vec3()) + (e == 3 ? W : Vec3());
+                Vec3 along = (e < 2) ? W : U;
+                Vec3 en = (e == 0) ? u * -1 : (e == 1) ? u : (e == 2) ? w * -1 : w;
+                Vec3 a0 = o0 + n * sA, a1 = o0 + n * sB;
+                addQuad(op, a0, a1, a1 + along, a0 + along, en, ecol, Vec3());
+                addQuad(op, a0, a0 + along, a1 + along, a1, en * -1, ecol, Vec3());
             }
-            if (side == 1) addQuad(op, p0, p0 + u, p0 + u + w, p0 + w, n, col, e);
-            else addQuad(op, p0, p0 + w, p0 + u + w, p0 + u, n * -1, col, e);
         }
     }
     // solid cells (contents)
@@ -693,6 +779,17 @@ void Viewer::run() {
         ren_.render(plat_.width(), plat_.height(), vp_, eye_, ropt_);
         if (in_.keyPressed[KEY_F12])
             ren_.saveScreenshot(exeDir() + "photon_shot_" + std::to_string(shotCount_++) + ".bmp", plat_.width(), plat_.height());
+        if (!still_.empty()) {
+            ++stillFrame_;
+            struct View { Vec3 eye, at; bool roofHidden; } views[3] = {
+                {Vec3(-9, -12, 11), Vec3(7, 5, 3), false},
+                {Vec3(7.6f, -6, 16), Vec3(7.6f, 4.6f, 2), true},
+                {Vec3(1.5f, 1.5f, 1.6f), Vec3(5, 4.5f, 1.2f), true}};
+            int vi = stillFrame_ / 20;
+            if (vi >= 3) break;
+            if (stillFrame_ % 20 == 1) { lookFrom(views[vi].eye, views[vi].at); hideRoof_ = views[vi].roofHidden; upperCut_ = vi == 1; meshDirty_ = true; }
+            if (stillFrame_ % 20 == 19) ren_.saveScreenshot(still_ + "_" + std::to_string(vi) + ".bmp", plat_.width(), plat_.height());
+        }
         if (done) {
             ren_.saveScreenshot(demo_ + "_" + std::to_string((int)shots_[shotIdx_]) + "s.bmp", plat_.width(), plat_.height());
             if (++shotIdx_ >= shots_.size()) break;

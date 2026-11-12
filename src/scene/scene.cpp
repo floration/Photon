@@ -232,6 +232,7 @@ bool Scene::load(const std::string& path, const MaterialLibrary& lib, std::strin
         }
     }
     generateFraming(lib);
+    generateObjects(lib);
     return true;
 }
 
