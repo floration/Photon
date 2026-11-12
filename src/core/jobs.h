@@ -12,8 +12,12 @@
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 #define PHOTON_PAUSE() _mm_pause()
+// Flush denormals to zero: smoke and species spreading into clean air leave
+// values near 1e-38 whose arithmetic is ~100x slower on x86.
+#define PHOTON_FTZ() _mm_setcsr(_mm_getcsr() | 0x8040)
 #else
 #define PHOTON_PAUSE() ((void)0)
+#define PHOTON_FTZ() ((void)0)
 #endif
 
 namespace photon {
@@ -38,6 +42,7 @@ public:
     // Calls fn(begin, end) over [0, n). The calling thread participates.
     void parallelFor(int n, const std::function<void(int, int)>& fn, int minChunk = 1) {
         if (n <= 0) return;
+        PHOTON_FTZ();   // the calling thread works too
         int t = threadCount();
         int chunk = std::max(minChunk, (n + t * 4 - 1) / (t * 4));
         if (workers_.empty() || n <= chunk) { fn(0, n); return; }
@@ -66,6 +71,7 @@ private:
         }
     }
     void workerLoop() {
+        PHOTON_FTZ();
         uint64_t seen = generation_.load(std::memory_order_acquire);
         int idle = 0;
         for (;;) {

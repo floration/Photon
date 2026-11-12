@@ -53,6 +53,18 @@ struct Barrier {
     int cellOn(int side) const { return (side == 0) == aIsInside ? cellA : cellB; }
 };
 
+// One level of the pressure multigrid preconditioner (pressure_mg.cpp).
+struct PressureLevel {
+    int n = 0;                       // unknowns
+    int nx = 0, ny = 0, nz = 0;      // level 0 only: the structured grid
+    std::vector<float> ax, ay, az;   // level 0 only: face coefficients
+    std::vector<int> rowStart, col;  // coarse levels: sparse couplings (off-diagonal, positive)
+    std::vector<float> val;
+    std::vector<int> bi, bj, bk;     // coarse levels: block coordinate of each unknown
+    std::vector<int> agg;            // unknown -> unknown on the next coarser level
+    std::vector<float> diag, x, b, r, t;
+};
+
 // Fidelity profile: the one solver run at reference or realtime settings.
 struct FidelityProfile {
     std::string name = "realtime";
@@ -251,6 +263,10 @@ private:
     std::vector<float> ax_, ay_, az_;    // pressure-matrix coefficient per face (open, not leak)
     std::vector<uint8_t> lx_, ly_, lz_;  // leak face: flow by the orifice equation
     std::vector<float> cgR_, cgZ_, cgP_, cgQ_;
+    std::vector<PressureLevel> mg_;
+    bool mgDirty_ = true;
+    void buildPressureLevels();
+    void pressurePrecondition(const std::vector<float>& r, std::vector<float>& z);
     bool zonesDirty_ = true;
     std::vector<int> burnList_;
     std::vector<std::string> eventKeys_;

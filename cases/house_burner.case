@@ -1,0 +1,12 @@
+photon_case 1
+# Gas phase in the full model home: 500 kW burner in the living room, doors as in
+# the scene, leakage on. Speed and stability check for the realtime profile.
+title "Photon Phase 3: 500 kW burner in the model home living room"
+scene scenes/model_home.txt
+profile realtime
+duration 20
+output out/house_burner
+burner "Gas burner" 2.0 2.0 2.6 2.6 0.0 500 10
+layer "LIVING" 3.0 3.0 0.0 2.44
+layer "BED1" 2.4 6.5 0.0 2.44
+device pressure "P_bed3" 9.0 6.5 4.0

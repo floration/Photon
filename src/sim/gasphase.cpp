@@ -110,6 +110,7 @@ void Solver::injectBurners(float dt) {
 // its own background pressure.
 void Solver::computeZones() {
     zonesDirty_ = false;
+    mgDirty_ = true;
     std::vector<int> old = zone;
     std::vector<float> oldPb = Pb;
     zone.assign(N, -1);
@@ -559,19 +560,23 @@ void Solver::project(float dt) {
     std::vector<float>& z = cgZ_;
     std::vector<float>& d = cgP_;
     std::vector<float>& q = cgQ_;
-    // r = b - A p ; z = r / diag ; d = z
-    double rz = sumSlices(*pool_, nz, [&](int k) {
-        apply(p, q, k);
-        double s = 0;
-        for (int c = k * sxy; c < (k + 1) * sxy; ++c) {
-            if (diag[c] <= 0) { r[c] = z[c] = d[c] = 0; continue; }
-            r[c] = b[c] - q[c];
-            z[c] = r[c] / diag[c];
-            d[c] = z[c];
-            s += (double)r[c] * z[c];
+    // r = b - A p ; z = M^-1 r (multigrid V-cycle) ; d = z
+    pool_->parallelFor(nz, [&](int kb, int ke) {
+        for (int k = kb; k < ke; ++k) {
+            apply(p, q, k);
+            for (int c = k * sxy; c < (k + 1) * sxy; ++c) r[c] = diag[c] > 0 ? b[c] - q[c] : 0.0f;
         }
-        return s;
     });
+    auto dotRZ = [&]() {
+        return sumSlices(*pool_, nz, [&](int k) {
+            double s = 0;
+            for (int c = k * sxy; c < (k + 1) * sxy; ++c) s += (double)r[c] * z[c];
+            return s;
+        });
+    };
+    pressurePrecondition(r, z);
+    d = z;
+    double rz = dotRZ();
     auto maxRes = [&]() {
         std::vector<float> part(nz, 0.0f);
         pool_->parallelFor(nz, [&](int kb, int ke) {
@@ -589,24 +594,22 @@ void Solver::project(float dt) {
         double dq = sumSlices(*pool_, nz, [&](int k) { return apply(d, q, k); });
         if (dq <= 0) break;
         double alpha = rz / dq;
-        double rzNew = sumSlices(*pool_, nz, [&](int k) {
-            double s = 0;
-            for (int c = k * sxy; c < (k + 1) * sxy; ++c) {
+        pool_->parallelFor(N, [&](int b0, int e0) {
+            for (int c = b0; c < e0; ++c) {
                 if (diag[c] <= 0) continue;
                 p[c] += (float)(alpha * d[c]);
                 r[c] -= (float)(alpha * q[c]);
-                z[c] = r[c] / diag[c];
-                s += (double)r[c] * z[c];
             }
-            return s;
-        });
+        }, 4096);
+        pressurePrecondition(r, z);
+        double rzNew = dotRZ();
         double beta = rzNew / rz;
         rz = rzNew;
         pool_->parallelFor(N, [&](int b0, int e0) {
             for (int c = b0; c < e0; ++c) d[c] = z[c] + (float)(beta * d[c]);
         }, 4096);
         ++it;
-        if ((it & 3) == 0 || it >= profile.pressureMaxIters) res = maxRes();
+        res = maxRes();
     }
     pressureIters = it;
     pressureResidual = maxRes();
