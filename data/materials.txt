@@ -189,7 +189,7 @@ material pu_foam
   char_yield 0.05
   surface_depth 0.005
   color 0.85 0.80 0.45
-  spread_rate 0.002 0.02      # covered upholstery: mm/s sideways, cm/s upward (PROTOTYPE, verify vs NIST sofa burns)
+  spread_rate 0.002 0.01      # covered upholstery: mm/s sideways, cm/s upward (PROTOTYPE, verify vs NIST sofa burns)
   melt_burn_area 0.4          # flexible PU foam collapses into a burning melt pool (calibrated to NIST sofa-room growth, verify)
   source "dHc, soot yield, Lg: Tewarson, SFPE Handbook, flexible polyurethane foams GM21-GM27 (verify)"
   source "density: typical upholstery grade 1.8 lb/ft3 (verify against NIST TN 2303 items)"
@@ -218,7 +218,7 @@ material fabric
   char_yield 0.10
   surface_depth 0.002
   color 0.35 0.42 0.62
-  spread_rate 0.002 0.02
+  spread_rate 0.002 0.01
   source "PROTOTYPE blend of Tewarson cotton and polyester values (SFPE Handbook, verify)"
   offgas TAR 0.45
   offgas H2O 0.15

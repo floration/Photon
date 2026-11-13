@@ -558,7 +558,7 @@ void Solver::solidsStep(float dt) {
             // contact flux on the touched patch (not charged to the gas: the patch is small)
             // flames rise: a flame below a surface bathes it, one beside it licks
             // it now and then, one above it mostly leaves (MODELED contact share)
-            const float share = (pilot[g] || gdir[q] == 4) ? 1.0f : gdir[q] == 5 ? 0.6f : 0.8f;   // an applied igniter flame touches fully
+            const float share = (pilot[g] || gdir[q] == 4) ? 1.0f : gdir[q] == 5 ? 0.3f : 0.4f;   // an applied igniter flame touches fully
             flameTouch = std::max(flameTouch, share * (surfaceHeating(g, Tg, Ts, h, 1e-4f) - convU));
             // burning part: heated by its flame at the pyrolysis temperature
             if (bf > 0) {
@@ -577,7 +577,7 @@ void Solver::solidsStep(float dt) {
                 // flames give ~15 kW/m2, metre-high flames ~35, room fires ~70 (MODELED)
                 if (qLocalCell != c) { qLocalCell = c; qLocal = localHRR(c); }
                 float Lf = 0.235f * std::pow(std::max(qLocal, 100.0f) / 1000.0f, 0.4f);
-                float epsF = 1.0f - std::exp(-0.8f * 0.3f * Lf);
+                float epsF = std::min(0.35f, 1.0f - std::exp(-0.8f * 0.3f * Lf));   // furniture flames: measured burning-surface fluxes stay near 30-50 kW/m2
                 float hb = std::max(h * (Tg - Tp), 20.0f * (1300.0f - Tp) + epsF * SIGMA * (p4(1300.0f) - p4(Tp)));
                 float emitB = radiationOn ? m.emissivity * SIGMA * (p4(Tp) - p4(T0)) : 0.0f;
                 Pburn += areaB * (hb - emitB);
@@ -598,7 +598,7 @@ void Solver::solidsStep(float dt) {
                 int n = c + off[d];
                 if (!blocked[n] || fuelMat[n] < 0 || burnFrac[n] <= 0 || fuelMass[n] <= 0) continue;
                 float fl = 20.0f * (1300.0f - Ts) + 0.3f * SIGMA * (p4(1300.0f) - p4(Ts));
-                flameTouch = std::max(flameTouch, 0.5f * burnFrac[n] * fl);
+                flameTouch = std::max(flameTouch, 0.25f * burnFrac[n] * fl);
             }
         }
         // porous fuel is also touched by flames in the cells around it (a flame
@@ -705,7 +705,7 @@ void Solver::solidsStep(float dt) {
             float v = fromBelow ? m.spreadUp : m.spreadLateral;
             // strong radiation from a hot layer preheats the surface ahead of the
             // flame: spread speeds up with the square of the excess over ~15 kW/m2
-            float boost = std::max(1.0f, qIn / 25000.0f);
+            float boost = std::max(1.0f, qIn / 40000.0f);
             // the flaming patch spreads outward from where it started: its edge
             // moves at v, so its area grows as 2 sqrt(pi A_b) v (a t-squared fire)
             float Ab = burnFrac[c] * std::max(area, 1e-4f);
